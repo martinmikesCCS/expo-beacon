@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["ExpoBeaconModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.beacon.ExpoBeaconModule"]
+  }
+}
