@@ -1,5 +1,11 @@
-// Reexport the native module. On web, it will be resolved to ExpoBeaconModule.web.ts
-// and on native platforms to ExpoBeaconModule.ts
-export { default } from './ExpoBeaconModule';
-export { default as ExpoBeaconView } from './ExpoBeaconView';
-export * from  './ExpoBeacon.types';
+// Native module (default export)
+export { default } from "./ExpoBeaconModule";
+
+// All public types
+export type {
+  BeaconScanResult,
+  PairedBeacon,
+  BeaconRegionEvent,
+  BeaconRangingEvent,
+  ExpoBeaconModuleEvents,
+} from "./ExpoBeacon.types";

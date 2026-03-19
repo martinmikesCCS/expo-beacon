@@ -11,14 +11,16 @@ Pod::Spec.new do |s|
   s.author         = package['author']
   s.homepage       = package['homepage']
   s.platforms      = {
-    :ios => '15.1',
-    :tvos => '15.1'
+    :ios => '15.1'
   }
   s.swift_version  = '5.9'
   s.source         = { git: 'https://github.com/martinmikesCCS/expo-beacon' }
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+
+  # Required system frameworks for iBeacon monitoring
+  s.frameworks = 'CoreLocation', 'CoreBluetooth', 'UserNotifications'
 
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {
@@ -27,3 +29,4 @@ Pod::Spec.new do |s|
 
   s.source_files = "**/*.{h,m,mm,swift,hpp,cpp}"
 end
+

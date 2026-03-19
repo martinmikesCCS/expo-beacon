@@ -1,19 +1,43 @@
-import type { StyleProp, ViewStyle } from 'react-native';
-
-export type OnLoadEventPayload = {
-  url: string;
+/** Raw beacon discovered during a scan. */
+export type BeaconScanResult = {
+  uuid: string; // iBeacon proximity UUID (uppercase, formatted)
+  major: number; // iBeacon major value (0–65535)
+  minor: number; // iBeacon minor value (0–65535)
+  rssi: number; // Signal strength in dBm (negative number)
+  distance: number; // Estimated distance in meters
+  txPower: number; // Calibrated TX power
 };
 
+/** A beacon that has been paired/registered for monitoring. */
+export type PairedBeacon = {
+  identifier: string; // User-defined label (e.g. "lobby-door")
+  uuid: string;
+  major: number;
+  minor: number;
+};
+
+/** Payload for enter/exit region events. */
+export type BeaconRegionEvent = {
+  identifier: string; // Matches PairedBeacon.identifier
+  uuid: string;
+  major: number;
+  minor: number;
+  event: "enter" | "exit";
+};
+
+/** Payload for ranging events (beacon proximity update). */
+export type BeaconRangingEvent = {
+  identifier: string;
+  uuid: string;
+  major: number;
+  minor: number;
+  rssi: number;
+  distance: number;
+};
+
+/** Module event map. */
 export type ExpoBeaconModuleEvents = {
-  onChange: (params: ChangeEventPayload) => void;
-};
-
-export type ChangeEventPayload = {
-  value: string;
-};
-
-export type ExpoBeaconViewProps = {
-  url: string;
-  onLoad: (event: { nativeEvent: OnLoadEventPayload }) => void;
-  style?: StyleProp<ViewStyle>;
+  onBeaconEnter: (params: BeaconRegionEvent) => void;
+  onBeaconExit: (params: BeaconRegionEvent) => void;
+  onBeaconRanging: (params: BeaconRangingEvent) => void;
 };

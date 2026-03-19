@@ -28,7 +28,11 @@
   "author": "mikes <martin.mikes@ccs.cz> (https://github.com/martinmikesCCS)",
   "license": "MIT",
   "homepage": "https://github.com/martinmikesCCS/expo-beacon#readme",
-  "dependencies": {},
+  "dependencies": {
+    "expo": "~55.0.8",
+    "react": "19.2.0",
+    "react-native": "0.83.2"
+  },
   "devDependencies": {
     "@types/react": "~19.1.1",
     "expo-module-scripts": "^55.0.2",
