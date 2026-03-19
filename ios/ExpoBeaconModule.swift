@@ -5,8 +5,9 @@ import UserNotifications
 private let PAIRED_BEACONS_KEY = "expo.beacon.paired"
 private let IS_MONITORING_KEY = "expo.beacon.is_monitoring"
 private let MAX_DISTANCE_KEY = "expo.beacon.max_distance"
+private let NOTIFICATION_CONFIG_KEY = "expo.beacon.notification_config"
 
-public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
+public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
 
     private lazy var locationManager: CLLocationManager = {
         let manager = CLLocationManager()
@@ -97,9 +98,29 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
             return self.loadPairedBeaconsRaw()
         }
 
+        // MARK: - Notification Config
+
+        Function("setNotificationConfig") { (config: [String: Any]) in
+            if let data = try? JSONSerialization.data(withJSONObject: config),
+               let json = String(data: data, encoding: .utf8) {
+                UserDefaults.standard.set(json, forKey: NOTIFICATION_CONFIG_KEY)
+            }
+        }
+
         // MARK: - Monitoring
 
-        AsyncFunction("startMonitoring") { (maxDistance: Double?, promise: Promise) in
+        AsyncFunction("startMonitoring") { (options: Any?, promise: Promise) in
+            var maxDistance: Double? = nil
+            if let dist = options as? Double {
+                maxDistance = dist
+            } else if let map = options as? [String: Any] {
+                maxDistance = map["maxDistance"] as? Double
+                if let notifications = map["notifications"] as? [String: Any],
+                   let data = try? JSONSerialization.data(withJSONObject: notifications),
+                   let json = String(data: data, encoding: .utf8) {
+                    UserDefaults.standard.set(json, forKey: NOTIFICATION_CONFIG_KEY)
+                }
+            }
             if let dist = maxDistance {
                 UserDefaults.standard.set(dist, forKey: MAX_DISTANCE_KEY)
             } else {
@@ -274,10 +295,32 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
     }
 
     private func postBeaconNotification(identifier: String, eventType: String) {
+        let cfg = loadNotificationConfig()
+        let eventsCfg = cfg["beaconEvents"] as? [String: Any]
+
+        // Respect the enabled flag (defaults to true)
+        if let enabled = eventsCfg?["enabled"] as? Bool, !enabled { return }
+
+        let defaultTitle = eventType == "enter" ? "Beacon Entered" : "Beacon Exited"
+        let title: String
+        if eventType == "enter" {
+            title = (eventsCfg?["enterTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
+        } else {
+            title = (eventsCfg?["exitTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
+        }
+
+        let bodyTemplate = (eventsCfg?["body"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            ?? "{identifier} region {event}ed"
+        let body = bodyTemplate
+            .replacingOccurrences(of: "{identifier}", with: identifier)
+            .replacingOccurrences(of: "{event}", with: eventType)
+
         let content = UNMutableNotificationContent()
-        content.title = eventType == "enter" ? "Beacon Entered" : "Beacon Exited"
-        content.body = "\(identifier) region \(eventType)ed"
-        content.sound = .default
+        content.title = title
+        content.body = body
+
+        let playSound = eventsCfg?["sound"] as? Bool ?? true
+        if playSound { content.sound = .default }
 
         let request = UNNotificationRequest(
             identifier: "beacon_\(eventType)_\(identifier)_\(Date().timeIntervalSince1970)",
@@ -285,6 +328,14 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
             trigger: nil  // deliver immediately
         )
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
+
+    private func loadNotificationConfig() -> [String: Any] {
+        guard let json = UserDefaults.standard.string(forKey: NOTIFICATION_CONFIG_KEY),
+              let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        return dict
     }
 
     private func constraintMatches(_ a: CLBeaconIdentityConstraint, _ b: CLBeaconIdentityConstraint) -> Bool {

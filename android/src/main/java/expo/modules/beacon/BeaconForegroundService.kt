@@ -70,7 +70,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 )
             }
             // Use continuous scanning (not JobScheduler) for foreground service
-            manager.setEnableScheduledScanJobs(false)
+            // Guard: throws if called after ranging/monitoring has already started
+            try { manager.setEnableScheduledScanJobs(false) } catch (_: IllegalStateException) {}
             manager.setBackgroundBetweenScanPeriod(5000L)  // 5s between scans
             manager.setBackgroundScanPeriod(1100L)         // 1.1s scan window
             manager.setForegroundScanPeriod(1000L)         // 1s scan window for distance logging
@@ -231,11 +232,33 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     private fun showEnterExitNotification(region: Region, eventType: String) {
-        val title = if (eventType == "enter") "Beacon Entered" else "Beacon Exited"
-        val message = "${region.uniqueId} region ${eventType}ed"
+        val config = readNotificationConfig()
+        val eventsConfig = config.optJSONObject("beaconEvents")
+
+        // Respect the enabled flag (defaults to true)
+        if (eventsConfig != null && !eventsConfig.optBoolean("enabled", true)) return
+
+        val defaultTitle = if (eventType == "enter") "Beacon Entered" else "Beacon Exited"
+        val title = if (eventType == "enter") {
+            eventsConfig?.optString("enterTitle")?.takeIf { it.isNotEmpty() } ?: defaultTitle
+        } else {
+            eventsConfig?.optString("exitTitle")?.takeIf { it.isNotEmpty() } ?: defaultTitle
+        }
+
+        val bodyTemplate = eventsConfig?.optString("body")?.takeIf { it.isNotEmpty() }
+            ?: "{identifier} region {event}ed"
+        val message = bodyTemplate
+            .replace("{identifier}", region.uniqueId)
+            .replace("{event}", eventType)
+
+        val iconName = eventsConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
+        val iconResId = iconName?.let { name ->
+            try { resources.getIdentifier(name, "drawable", packageName).takeIf { it != 0 } }
+            catch (_: Exception) { null }
+        } ?: android.R.drawable.ic_dialog_info
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(iconResId)
             .setContentTitle(title)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -251,25 +274,56 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Beacon Monitoring",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Used for background iBeacon region monitoring"
+            val config = readNotificationConfig()
+            val channelConfig = config.optJSONObject("channel")
+
+            val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
+                ?: "Beacon Monitoring"
+            val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
+                ?: "Used for background iBeacon region monitoring"
+            val importance = when (channelConfig?.optString("importance")) {
+                "high" -> NotificationManager.IMPORTANCE_HIGH
+                "default" -> NotificationManager.IMPORTANCE_DEFAULT
+                else -> NotificationManager.IMPORTANCE_LOW
             }
-            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+
+            val notifMgr = getSystemService(NotificationManager::class.java)
+            // Delete and recreate so config changes take effect
+            notifMgr?.deleteNotificationChannel(CHANNEL_ID)
+            val channel = NotificationChannel(CHANNEL_ID, channelName, importance).apply {
+                description = channelDesc
+            }
+            notifMgr?.createNotificationChannel(channel)
         }
     }
 
     private fun buildForegroundNotification(): Notification {
+        val config = readNotificationConfig()
+        val fgConfig = config.optJSONObject("foregroundService")
+
+        val title = fgConfig?.optString("title")?.takeIf { it.isNotEmpty() }
+            ?: "Beacon Monitoring Active"
+        val text = fgConfig?.optString("text")?.takeIf { it.isNotEmpty() }
+            ?: "Monitoring for iBeacons in the background"
+        val iconName = fgConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
+        val iconResId = iconName?.let { name ->
+            try { resources.getIdentifier(name, "drawable", packageName).takeIf { it != 0 } }
+            catch (_: Exception) { null }
+        } ?: android.R.drawable.ic_dialog_info
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Beacon Monitoring Active")
-            .setContentText("Monitoring for iBeacons in the background")
+            .setSmallIcon(iconResId)
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
+    }
+
+    private fun readNotificationConfig(): org.json.JSONObject {
+        val json = getSharedPreferences("expo.beacon.notification_config", Context.MODE_PRIVATE)
+            .getString("config", null) ?: return org.json.JSONObject()
+        return try { org.json.JSONObject(json) } catch (_: Exception) { org.json.JSONObject() }
     }
 
     override fun onDestroy() {

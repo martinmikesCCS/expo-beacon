@@ -46,6 +46,69 @@ export type BeaconDistanceEvent = {
   distance: number;
 };
 
+/** Configuration for beacon enter/exit event notifications. */
+export type BeaconNotificationConfig = {
+  /** Whether to show enter/exit notifications. Default: true. */
+  enabled?: boolean;
+  /** Notification title on beacon enter. Default: "Beacon Entered". */
+  enterTitle?: string;
+  /** Notification title on beacon exit. Default: "Beacon Exited". */
+  exitTitle?: string;
+  /**
+   * Notification body template. Supports {identifier} and {event} placeholders.
+   * Default: "{identifier} region {event}ed".
+   */
+  body?: string;
+  /** Play a sound with the notification (iOS only). Default: true. */
+  sound?: boolean;
+  /** Android drawable resource name for the notification icon (e.g. "ic_notification"). */
+  icon?: string;
+};
+
+/** Configuration for the Android foreground service notification (persistent status bar entry). */
+export type ForegroundServiceConfig = {
+  /** Title of the persistent notification. Default: "Beacon Monitoring Active". */
+  title?: string;
+  /** Body text of the persistent notification. Default: "Monitoring for iBeacons in the background". */
+  text?: string;
+  /** Android drawable resource name for the notification icon. */
+  icon?: string;
+};
+
+/** Configuration for the Android notification channel. */
+export type NotificationChannelConfig = {
+  /** Channel display name shown in system settings. Default: "Beacon Monitoring". */
+  name?: string;
+  /** Channel description shown in system settings. Default: "Used for background iBeacon region monitoring". */
+  description?: string;
+  /**
+   * Channel importance level. Default: 'low'.
+   * Note: Android may ignore decreases in importance after first channel creation until the app is reinstalled.
+   */
+  importance?: "low" | "default" | "high";
+};
+
+/** Combined notification configuration for all notification types. */
+export type NotificationConfig = {
+  /** Settings for beacon enter/exit event notifications. */
+  beaconEvents?: BeaconNotificationConfig;
+  /** Settings for the persistent foreground service notification (Android only). */
+  foregroundService?: ForegroundServiceConfig;
+  /** Settings for the Android notification channel (Android only). */
+  channel?: NotificationChannelConfig;
+};
+
+/** Options accepted by startMonitoring(). */
+export type MonitoringOptions = {
+  /**
+   * Maximum distance in metres for distance-based enter events.
+   * Exit events are always emitted when the region is lost.
+   */
+  maxDistance?: number;
+  /** Notification configuration overrides to apply for this monitoring session. */
+  notifications?: NotificationConfig;
+};
+
 /** Module event map. */
 export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;

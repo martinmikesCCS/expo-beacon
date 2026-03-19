@@ -21,15 +21,20 @@ import org.json.JSONObject
 
 private const val PREFS_NAME = "expo.beacon.paired"
 private const val PREFS_KEY = "paired_beacons"
+private const val NOTIFICATION_CONFIG_PREFS = "expo.beacon.notification_config"
 
 class ExpoBeaconModule : Module(), BeaconConsumer {
 
     private val beaconManager: BeaconManager by lazy {
         BeaconManager.getInstanceForApplication(appContext.reactContext!!).also { manager ->
+            // Must be configured before any bind/ranging starts
+            manager.setEnableScheduledScanJobs(false)
             // Register iBeacon layout parser
-            manager.beaconParsers.add(
-                BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
-            )
+            if (manager.beaconParsers.none { it.layout?.contains("0215") == true }) {
+                manager.beaconParsers.add(
+                    BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
+                )
+            }
         }
     }
 
@@ -149,8 +154,23 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
         }
 
-        AsyncFunction("startMonitoring") { maxDistance: Double?, promise: Promise ->
+        AsyncFunction("startMonitoring") { options: Any?, promise: Promise ->
             val ctx = appContext.reactContext!!
+            var maxDistance: Double? = null
+            when (options) {
+                is Double -> maxDistance = options
+                is Map<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val map = options as Map<String, Any?>
+                    maxDistance = (map["maxDistance"] as? Number)?.toDouble()
+                    val notifications = map["notifications"]
+                    if (notifications is Map<*, *>) {
+                        @Suppress("UNCHECKED_CAST")
+                        ctx.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
+                            .edit().putString("config", mapToJson(notifications as Map<String, Any?>).toString()).apply()
+                    }
+                }
+            }
             ctx.getSharedPreferences("expo.beacon.monitoring_options", Context.MODE_PRIVATE)
                 .edit().apply {
                     if (maxDistance != null) putFloat("max_distance", maxDistance.toFloat())
@@ -159,6 +179,13 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             registerEventReceiver()
             BeaconForegroundService.start(ctx)
             promise.resolve(null)
+        }
+
+        Function("setNotificationConfig") { config: Map<String, Any?> ->
+            val ctx = appContext.reactContext!!
+            ctx.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
+                .edit().putString("config", mapToJson(config).toString()).apply()
+            null
         }
 
         AsyncFunction("stopMonitoring") { promise: Promise ->
@@ -282,6 +309,23 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
         scanPromise?.resolve(results)
         scanPromise = null
+    }
+
+    // --- Notification config helpers ---
+
+    private fun mapToJson(map: Map<String, Any?>): JSONObject {
+        val json = JSONObject()
+        map.forEach { (key, value) ->
+            when (value) {
+                null -> json.put(key, JSONObject.NULL)
+                is Map<*, *> -> {
+                    @Suppress("UNCHECKED_CAST")
+                    json.put(key, mapToJson(value as Map<String, Any?>))
+                }
+                else -> json.put(key, value)
+            }
+        }
+        return json
     }
 
     // --- Shared Preferences helpers ---

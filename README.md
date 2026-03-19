@@ -276,28 +276,46 @@ paired.forEach((b) =>
 
 ---
 
-### `startMonitoring(maxDistance?)`
+### `startMonitoring(options?)`
 
 ```ts
-startMonitoring(maxDistance?: number): Promise<void>
+startMonitoring(options?: MonitoringOptions | number): Promise<void>
 ```
 
 Starts background region monitoring for all paired beacons.
 
-| Parameter     | Type     | Default      | Description                                                                                   |
-| ------------- | -------- | ------------ | --------------------------------------------------------------------------------------------- |
-| `maxDistance` | `number` | `undefined`  | Optional distance threshold in metres. `onBeaconEnter` is only emitted when the measured distance is ≤ this value. `onBeaconExit` is always emitted. Omit to disable distance filtering. |
+Accepts either a `MonitoringOptions` object or a plain `number` (backward-compatible shorthand for `maxDistance`).
+
+**`MonitoringOptions`**
+
+| Property        | Type                 | Default     | Description                                                                                   |
+| --------------- | -------------------- | ----------- | --------------------------------------------------------------------------------------------- |
+| `maxDistance`   | `number`             | `undefined` | Optional distance threshold in metres. `onBeaconEnter` is only emitted when the measured distance is ≤ this value. `onBeaconExit` is always emitted. Omit to disable distance filtering. |
+| `notifications` | `NotificationConfig` | `undefined` | Notification config overrides applied for this session. Persisted and takes effect immediately. |
 
 **Android**: Launches `BeaconForegroundService` — a persistent foreground service required by Android 8+ for background BLE. Restarts automatically after device reboot.
 
 **iOS**: Activates `CLLocationManager` region monitoring. iOS can wake or relaunch the app when a region boundary is crossed, even if the app is terminated.
 
 ```ts
-// Monitor with no distance limit
-await ExpoBeacon.startMonitoring();
-
-// Only fire enter events when within 5 metres
+// Backward-compatible shorthand (number = maxDistance)
 await ExpoBeacon.startMonitoring(5);
+
+// Full options object
+await ExpoBeacon.startMonitoring({
+  maxDistance: 5,
+  notifications: {
+    beaconEvents: {
+      enterTitle: "Beacon nearby!",
+      body: "{identifier} is within range",
+    },
+  },
+});
+
+// Monitor with no distance limit and no enter/exit notifications
+await ExpoBeacon.startMonitoring({
+  notifications: { beaconEvents: { enabled: false } },
+});
 ```
 
 > Call `requestPermissionsAsync()` before `startMonitoring()`.
@@ -315,6 +333,48 @@ Stops background monitoring and removes all active region subscriptions. On Andr
 ```ts
 await ExpoBeacon.stopMonitoring();
 ```
+
+---
+
+### `setNotificationConfig(config)`
+
+```ts
+setNotificationConfig(config: NotificationConfig): void
+```
+
+Persists notification configuration that is applied to all subsequent monitoring sessions. Values are stored in `SharedPreferences` (Android) / `UserDefaults` (iOS) and survive app restarts.
+
+For one-off overrides tied to a single session, pass `notifications` directly in [`startMonitoring(options)`](#startmonitoringoptions) instead — it calls this function automatically.
+
+```ts
+ExpoBeacon.setNotificationConfig({
+  // Enter/exit alert notifications
+  beaconEvents: {
+    enabled: true,                    // false to suppress all enter/exit notifications
+    enterTitle: "Beacon nearby",
+    exitTitle: "Beacon out of range",
+    body: "{identifier} {event}ed",   // {identifier} and {event} are replaced at runtime
+    sound: true,                      // iOS only — default true
+    icon: "ic_beacon_notification",   // Android only — drawable resource name
+  },
+
+  // Persistent status-bar notification while monitoring is active (Android only)
+  foregroundService: {
+    title: "My App is watching",
+    text: "Monitoring for nearby beacons",
+    icon: "ic_service",               // Android drawable resource name
+  },
+
+  // Android notification channel settings
+  channel: {
+    name: "Proximity Alerts",
+    description: "Alerts when beacons enter or leave range",
+    importance: "default",            // "low" | "default" | "high"
+  },
+});
+```
+
+> **Android channel importance note**: Android prevents decreasing channel importance once a user has been notified. Increasing importance always works; decreasing it will have no effect until the user clears the app's notification settings or reinstalls the app.
 
 ---
 
@@ -476,6 +536,71 @@ type BeaconDistanceEvent = {
 
 ---
 
+### `MonitoringOptions`
+
+Passed to `startMonitoring(options)`.
+
+```ts
+type MonitoringOptions = {
+  maxDistance?: number;           // Distance threshold in metres for enter events
+  notifications?: NotificationConfig; // Notification overrides for this session
+};
+```
+
+### `NotificationConfig`
+
+Top-level config object accepted by `setNotificationConfig()` and `startMonitoring({ notifications })`.
+
+```ts
+type NotificationConfig = {
+  beaconEvents?: BeaconNotificationConfig;
+  foregroundService?: ForegroundServiceConfig;  // Android only
+  channel?: NotificationChannelConfig;          // Android only
+};
+```
+
+### `BeaconNotificationConfig`
+
+Controls the enter/exit alert notifications.
+
+```ts
+type BeaconNotificationConfig = {
+  enabled?: boolean;     // false to disable all enter/exit notifications. Default: true
+  enterTitle?: string;   // Default: "Beacon Entered"
+  exitTitle?: string;    // Default: "Beacon Exited"
+  body?: string;         // Template — {identifier} and {event} are replaced at runtime
+                         // Default: "{identifier} region {event}ed"
+  sound?: boolean;       // iOS only — play notification sound. Default: true
+  icon?: string;         // Android only — drawable resource name (e.g. "ic_notification")
+};
+```
+
+### `ForegroundServiceConfig`
+
+Controls the persistent Android status-bar notification while monitoring is active.
+
+```ts
+type ForegroundServiceConfig = {
+  title?: string;  // Default: "Beacon Monitoring Active"
+  text?: string;   // Default: "Monitoring for iBeacons in the background"
+  icon?: string;   // Android drawable resource name
+};
+```
+
+### `NotificationChannelConfig`
+
+Controls the Android notification channel shown in system settings.
+
+```ts
+type NotificationChannelConfig = {
+  name?: string;                          // Default: "Beacon Monitoring"
+  description?: string;                   // Default: "Used for background iBeacon region monitoring"
+  importance?: "low" | "default" | "high"; // Default: "low"
+};
+```
+
+---
+
 ## Background Behaviour
 
 ### Android
@@ -494,14 +619,30 @@ Default scan timing: 1.1 s scan window every 5 s.
 
 ## Notifications
 
-A local notification is posted for every `onBeaconEnter` and `onBeaconExit` event.
+A local notification is posted for every `onBeaconEnter` and `onBeaconExit` event. All notification settings can be customised via [`setNotificationConfig()`](#setnotificationconfigconfig) or inline in [`startMonitoring(options)`](#startmonitoringoptions).
+
+### Defaults
+
+| Property                       | Default value                                    |
+| ------------------------------ | ------------------------------------------------ |
+| Enter title                    | `"Beacon Entered"`                               |
+| Exit title                     | `"Beacon Exited"`                                |
+| Body                           | `"{identifier} region {event}ed"`                |
+| Sound (iOS)                    | `true`                                           |
+| Icon (Android)                 | System `ic_dialog_info`                          |
+| Foreground service title       | `"Beacon Monitoring Active"`                     |
+| Foreground service text        | `"Monitoring for iBeacons in the background"`    |
+| Channel name (Android)         | `"Beacon Monitoring"`                            |
+| Channel importance (Android)   | `"low"`                                          |
+
+### Channel IDs (Android)
 
 | Channel / type                  | Importance          |
 | ------------------------------- | ------------------- |
-| Foreground service (Android)    | `IMPORTANCE_LOW`    |
-| Enter / exit alerts             | `IMPORTANCE_DEFAULT`|
+| Foreground service (Android)    | configurable (default `low`) |
+| Enter / exit alerts             | configurable (default `default`) |
 
-Both channels share the id `expo_beacon_channel`.
+Both notifications share the channel id `expo_beacon_channel`. The channel is recreated on each `onStartCommand` so config changes take effect on the next monitoring start.
 
 ---
 

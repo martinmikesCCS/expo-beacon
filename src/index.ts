@@ -7,5 +7,11 @@ export type {
   PairedBeacon,
   BeaconRegionEvent,
   BeaconRangingEvent,
+  BeaconDistanceEvent,
   ExpoBeaconModuleEvents,
+  NotificationConfig,
+  MonitoringOptions,
+  BeaconNotificationConfig,
+  ForegroundServiceConfig,
+  NotificationChannelConfig,
 } from "./ExpoBeacon.types";

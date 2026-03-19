@@ -4,6 +4,8 @@ import {
   ExpoBeaconModuleEvents,
   BeaconScanResult,
   PairedBeacon,
+  NotificationConfig,
+  MonitoringOptions,
 } from "./ExpoBeacon.types";
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
@@ -34,14 +36,20 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   getPairedBeacons(): PairedBeacon[];
 
   /**
+   * Set persistent notification configuration. Settings are saved and applied to all
+   * subsequent monitoring sessions until explicitly changed.
+   */
+  setNotificationConfig(config: NotificationConfig): void;
+
+  /**
    * Start background region monitoring for all paired beacons.
    * On Android starts a foreground service.
    * On iOS starts CLLocationManager region monitoring.
-   * @param maxDistance Optional distance threshold in metres. Enter events are only
-   *   emitted when the beacon is measured to be within this distance.
-   *   Exit events are always emitted when the beacon region is lost.
+   *
+   * Accepts a plain number (backward-compatible maxDistance shorthand) or a
+   * MonitoringOptions object with maxDistance and/or notification overrides.
    */
-  startMonitoring(maxDistance?: number): Promise<void>;
+  startMonitoring(options?: MonitoringOptions | number): Promise<void>;
 
   /**
    * Stop background region monitoring.
@@ -61,4 +69,14 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   requestPermissionsAsync(): Promise<boolean>;
 }
 
-export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");
+try {
+  // eslint-disable-next-line import/no-mutable-exports
+  var module = requireNativeModule<ExpoBeaconModule>("ExpoBeacon");
+} catch {
+  throw new Error(
+    "expo-beacon: native module not found. Make sure you are using a development build " +
+      "(not Expo Go) and have run `npx expo prebuild` followed by a native rebuild.",
+  );
+}
+
+export default module;
