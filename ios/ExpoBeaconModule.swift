@@ -4,6 +4,7 @@ import UserNotifications
 
 private let PAIRED_BEACONS_KEY = "expo.beacon.paired"
 private let IS_MONITORING_KEY = "expo.beacon.is_monitoring"
+private let MAX_DISTANCE_KEY = "expo.beacon.max_distance"
 
 public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
 
@@ -24,13 +25,23 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
     // Monitored regions
     private var monitoredRegions: [CLBeaconRegion] = []
 
+    // Always-on ranging for distance events + distance-based enter/exit (identifier → constraint)
+    private var distanceRangingConstraints: [String: CLBeaconIdentityConstraint] = [:]
+    // Identifiers currently in "entered" state (used for distance-driven enter/exit)
+    private var enteredRegions: Set<String> = []
+
+    // Continuous scan state
+    private var continuousScanActive = false
+    // Constraints started exclusively for continuous scan (not shared with distance ranging)
+    private var continuousScanOnlyConstraints: [CLBeaconIdentityConstraint] = []
+
     // Permission callback
     private var permissionCompletion: ((Bool) -> Void)?
 
     public func definition() -> ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconRanging")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconRanging", "onBeaconDistance", "onBeaconFound")
 
         // MARK: - Scan
 
@@ -49,8 +60,7 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
                     return
                 }
 
-                // iOS ranging requires a specific UUID; use a "null" UUID for generic scan
-                // In practice, users should scan known UUIDs. This scans with a placeholder.
+                // iOS ranging requires a specific UUID; use a placeholder for generic scan
                 let placeholderUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
                 let region = CLBeaconRegion(uuid: placeholderUUID, identifier: "scan_wildcard")
                 self.scanRegion = region
@@ -89,7 +99,12 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
 
         // MARK: - Monitoring
 
-        AsyncFunction("startMonitoring") { (promise: Promise) in
+        AsyncFunction("startMonitoring") { (maxDistance: Double?, promise: Promise) in
+            if let dist = maxDistance {
+                UserDefaults.standard.set(dist, forKey: MAX_DISTANCE_KEY)
+            } else {
+                UserDefaults.standard.removeObject(forKey: MAX_DISTANCE_KEY)
+            }
             UserDefaults.standard.set(true, forKey: IS_MONITORING_KEY)
             self.requestLocationPermission { granted in
                 guard granted else {
@@ -104,6 +119,7 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
 
         AsyncFunction("stopMonitoring") { (promise: Promise) in
             UserDefaults.standard.set(false, forKey: IS_MONITORING_KEY)
+            UserDefaults.standard.removeObject(forKey: MAX_DISTANCE_KEY)
             self.stopRegionMonitoring()
             promise.resolve(nil)
         }
@@ -112,6 +128,22 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
             self.requestLocationPermission { granted in
                 promise.resolve(granted)
             }
+        }
+
+        // MARK: - Continuous Scan
+
+        Function("startContinuousScan") { () -> Void in
+            guard !self.continuousScanActive else { return }
+            self.continuousScanActive = true
+            self.startContinuousScanRanging()
+        }
+
+        Function("stopContinuousScan") { () -> Void in
+            self.continuousScanActive = false
+            for constraint in self.continuousScanOnlyConstraints {
+                self.locationManager.stopRangingBeacons(satisfying: constraint)
+            }
+            self.continuousScanOnlyConstraints.removeAll()
         }
     }
 
@@ -160,6 +192,15 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
 
             monitoredRegions.append(region)
             locationManager.startMonitoring(for: region)
+
+            // Always-on ranging for distance events + distance-driven enter/exit
+            let constraint = CLBeaconIdentityConstraint(
+                uuid: uuid,
+                major: CLBeaconMajorValue(major),
+                minor: CLBeaconMinorValue(minor)
+            )
+            distanceRangingConstraints[identifier] = constraint
+            locationManager.startRangingBeacons(satisfying: constraint)
         }
     }
 
@@ -168,6 +209,37 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
             locationManager.stopMonitoring(for: region)
         }
         monitoredRegions.removeAll()
+
+        for constraint in distanceRangingConstraints.values {
+            locationManager.stopRangingBeacons(satisfying: constraint)
+        }
+        distanceRangingConstraints.removeAll()
+        enteredRegions.removeAll()
+    }
+
+    // Start ranging for paired beacons not already covered by distance ranging
+    private func startContinuousScanRanging() {
+        let beacons = loadPairedBeaconsRaw()
+        for b in beacons {
+            guard
+                let identifier = b["identifier"] as? String,
+                let uuidString = b["uuid"] as? String,
+                let uuid = UUID(uuidString: uuidString),
+                let major = b["major"] as? Int,
+                let minor = b["minor"] as? Int
+            else { continue }
+
+            // Reuse the existing distance-ranging stream if monitoring is active
+            if distanceRangingConstraints[identifier] != nil { continue }
+
+            let constraint = CLBeaconIdentityConstraint(
+                uuid: uuid,
+                major: CLBeaconMajorValue(major),
+                minor: CLBeaconMinorValue(minor)
+            )
+            continuousScanOnlyConstraints.append(constraint)
+            locationManager.startRangingBeacons(satisfying: constraint)
+        }
     }
 
     private func stopScanAndResolve() {
@@ -215,6 +287,10 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
+    private func constraintMatches(_ a: CLBeaconIdentityConstraint, _ b: CLBeaconIdentityConstraint) -> Bool {
+        return a.uuid == b.uuid && a.major == b.major && a.minor == b.minor
+    }
+
     // MARK: - CLLocationManagerDelegate
 
     public func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
@@ -224,33 +300,129 @@ public class ExpoBeaconModule: Module, CLLocationManagerDelegate {
     }
 
     public func locationManager(_ manager: CLLocationManager, didRangeBeacons beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
-        scannedBeacons.append(contentsOf: beacons)
+        // 1. One-shot scan mode
+        if let sc = scanConstraint, constraintMatches(sc, constraint) {
+            scannedBeacons.append(contentsOf: beacons)
+            return
+        }
+
+        // 2. Distance-ranging for monitored beacons
+        if let (identifier, _) = distanceRangingConstraints.first(where: { constraintMatches($0.value, constraint) }) {
+            guard let beacon = beacons.first(where: { $0.accuracy >= 0 }) else {
+                return
+            }
+
+            // Emit distance event every ranging cycle (~1 s)
+            let distParams: [String: Any] = [
+                "identifier": identifier,
+                "uuid": beacon.uuid.uuidString.uppercased(),
+                "major": beacon.major.intValue,
+                "minor": beacon.minor.intValue,
+                "distance": beacon.accuracy
+            ]
+            sendEvent("onBeaconDistance", distParams)
+            print("[ExpoBeacon] DIST: \(identifier) → \(String(format: "%.2f", beacon.accuracy))m")
+
+            // Distance-driven enter/exit synthesis
+            if let maxDist = UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) as? Double {
+                if !enteredRegions.contains(identifier) && beacon.accuracy <= maxDist {
+                    enteredRegions.insert(identifier)
+                    let params: [String: Any] = [
+                        "identifier": identifier,
+                        "uuid": beacon.uuid.uuidString.uppercased(),
+                        "major": beacon.major.intValue,
+                        "minor": beacon.minor.intValue,
+                        "event": "enter",
+                        "distance": beacon.accuracy
+                    ]
+                    sendEvent("onBeaconEnter", params)
+                    postBeaconNotification(identifier: identifier, eventType: "enter")
+                } else if enteredRegions.contains(identifier) && beacon.accuracy > maxDist {
+                    enteredRegions.remove(identifier)
+                    let params: [String: Any] = [
+                        "identifier": identifier,
+                        "uuid": beacon.uuid.uuidString.uppercased(),
+                        "major": beacon.major.intValue,
+                        "minor": beacon.minor.intValue,
+                        "event": "exit",
+                        "distance": beacon.accuracy
+                    ]
+                    sendEvent("onBeaconExit", params)
+                    postBeaconNotification(identifier: identifier, eventType: "exit")
+                }
+            }
+
+            // Also emit onBeaconFound if continuous scan is active for this beacon
+            if continuousScanActive {
+                let foundParams: [String: Any] = [
+                    "uuid": beacon.uuid.uuidString.uppercased(),
+                    "major": beacon.major.intValue,
+                    "minor": beacon.minor.intValue,
+                    "rssi": beacon.rssi,
+                    "distance": beacon.accuracy,
+                    "txPower": 0
+                ]
+                sendEvent("onBeaconFound", foundParams)
+            }
+            return
+        }
+
+        // 3. Continuous-scan-only constraints (monitoring not active)
+        if continuousScanActive,
+           continuousScanOnlyConstraints.contains(where: { constraintMatches($0, constraint) }) {
+            for beacon in beacons where beacon.accuracy >= 0 {
+                let params: [String: Any] = [
+                    "uuid": beacon.uuid.uuidString.uppercased(),
+                    "major": beacon.major.intValue,
+                    "minor": beacon.minor.intValue,
+                    "rssi": beacon.rssi,
+                    "distance": beacon.accuracy,
+                    "txPower": 0
+                ]
+                sendEvent("onBeaconFound", params)
+            }
+        }
     }
 
     public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
+        let identifier = beaconRegion.identifier
+
+        // If maxDistance is set, distance ranging handles enter/exit — skip region-based emit
+        guard UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) == nil else { return }
+
         let params: [String: Any] = [
-            "identifier": beaconRegion.identifier,
+            "identifier": identifier,
             "uuid": beaconRegion.uuid.uuidString.uppercased(),
             "major": beaconRegion.major?.intValue ?? 0,
             "minor": beaconRegion.minor?.intValue ?? 0,
-            "event": "enter"
+            "event": "enter",
+            "distance": -1
         ]
         sendEvent("onBeaconEnter", params)
-        postBeaconNotification(identifier: beaconRegion.identifier, eventType: "enter")
+        postBeaconNotification(identifier: identifier, eventType: "enter")
     }
 
     public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
+        let identifier = beaconRegion.identifier
+
+        // If maxDistance is set, distance ranging handles exit; just clean up tracked state
+        if UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) != nil {
+            enteredRegions.remove(identifier)
+            return
+        }
+
         let params: [String: Any] = [
-            "identifier": beaconRegion.identifier,
+            "identifier": identifier,
             "uuid": beaconRegion.uuid.uuidString.uppercased(),
             "major": beaconRegion.major?.intValue ?? 0,
             "minor": beaconRegion.minor?.intValue ?? 0,
-            "event": "exit"
+            "event": "exit",
+            "distance": -1
         ]
         sendEvent("onBeaconExit", params)
-        postBeaconNotification(identifier: beaconRegion.identifier, eventType: "exit")
+        postBeaconNotification(identifier: identifier, eventType: "exit")
     }
 
     public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {

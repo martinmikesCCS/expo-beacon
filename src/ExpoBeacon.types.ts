@@ -23,6 +23,8 @@ export type BeaconRegionEvent = {
   major: number;
   minor: number;
   event: "enter" | "exit";
+  /** Measured distance in metres at the time of the event (–1 if unavailable). */
+  distance: number;
 };
 
 /** Payload for ranging events (beacon proximity update). */
@@ -35,9 +37,21 @@ export type BeaconRangingEvent = {
   distance: number;
 };
 
+/** Payload for periodic distance update events during monitoring. */
+export type BeaconDistanceEvent = {
+  identifier: string;
+  uuid: string;
+  major: number;
+  minor: number;
+  distance: number;
+};
+
 /** Module event map. */
 export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;
   onBeaconExit: (params: BeaconRegionEvent) => void;
   onBeaconRanging: (params: BeaconRangingEvent) => void;
+  onBeaconDistance: (params: BeaconDistanceEvent) => void;
+  /** Fired continuously during a live scan as each beacon is detected. */
+  onBeaconFound: (params: BeaconScanResult) => void;
 };

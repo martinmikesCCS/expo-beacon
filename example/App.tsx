@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Button,
   TouchableOpacity,
@@ -14,6 +15,7 @@ import type {
   BeaconScanResult,
   PairedBeacon,
   BeaconRegionEvent,
+  BeaconDistanceEvent,
 } from "expo-beacon";
 
 interface EventLogEntry {
@@ -26,9 +28,11 @@ interface EventLogEntry {
 export default function App() {
   const [isScanning, setIsScanning] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [maxDistance, setMaxDistance] = useState("");
   const [scanResults, setScanResults] = useState<BeaconScanResult[]>([]);
   const [pairedBeacons, setPairedBeacons] = useState<PairedBeacon[]>([]);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
+  const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
 
   const addLog = useCallback(
     (message: string, type: EventLogEntry["type"] = "info") => {
@@ -47,7 +51,7 @@ export default function App() {
     [],
   );
 
-  // Subscribe to enter/exit events
+  // Subscribe to enter/exit/distance events
   useEffect(() => {
     const enterSub = ExpoBeacon.addListener(
       "onBeaconEnter",
@@ -61,10 +65,17 @@ export default function App() {
         addLog(`EXITED: ${event.identifier} (${event.uuid})`, "exit");
       },
     );
+    const distSub = ExpoBeacon.addListener(
+      "onBeaconDistance",
+      (event: BeaconDistanceEvent) => {
+        addLog(`DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`, "info");
+      },
+    );
 
     return () => {
       enterSub.remove();
       exitSub.remove();
+      distSub.remove();
     };
   }, [addLog]);
 
@@ -87,19 +98,36 @@ export default function App() {
     }
   };
 
-  const handleScan = async () => {
-    setIsScanning(true);
+  const handleStartLiveScan = () => {
     setScanResults([]);
-    addLog("Starting 5s scan...");
-    try {
-      const results = await ExpoBeacon.scanForBeaconsAsync(5000);
-      setScanResults(results);
-      addLog(`Scan complete — found ${results.length} beacon(s)`);
-    } catch (e: any) {
-      addLog(`Scan error: ${e.message}`);
-    } finally {
-      setIsScanning(false);
-    }
+    setIsScanning(true);
+    addLog("Live scan started...");
+    liveScanSubRef.current = ExpoBeacon.addListener(
+      "onBeaconFound",
+      (beacon: BeaconScanResult) => {
+        setScanResults((prev) => {
+          const key = `${beacon.uuid}-${beacon.major}-${beacon.minor}`;
+          const idx = prev.findIndex(
+            (b) => `${b.uuid}-${b.major}-${b.minor}` === key,
+          );
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = beacon;
+            return updated;
+          }
+          return [...prev, beacon];
+        });
+      },
+    );
+    ExpoBeacon.startContinuousScan();
+  };
+
+  const handleStopLiveScan = () => {
+    ExpoBeacon.stopContinuousScan();
+    liveScanSubRef.current?.remove();
+    liveScanSubRef.current = null;
+    setIsScanning(false);
+    addLog("Live scan stopped");
   };
 
   const handlePair = (beacon: BeaconScanResult) => {
@@ -117,9 +145,14 @@ export default function App() {
 
   const handleStartMonitoring = async () => {
     try {
-      await ExpoBeacon.startMonitoring();
+      const dist = maxDistance.trim() !== "" ? parseFloat(maxDistance) : undefined;
+      await ExpoBeacon.startMonitoring(dist);
       setIsMonitoring(true);
-      addLog("Background monitoring started ✓");
+      addLog(
+        dist !== undefined
+          ? `Background monitoring started ✓ (≤${dist}m)`
+          : "Background monitoring started ✓"
+      );
     } catch (e: any) {
       addLog(`Monitor error: ${e.message}`);
     }
@@ -151,9 +184,9 @@ export default function App() {
         {/* Scan */}
         <Section title="Scan for Beacons">
           <Button
-            title={isScanning ? "Scanning..." : "Start 5s Scan"}
-            onPress={handleScan}
-            disabled={isScanning}
+            title={isScanning ? "Stop Live Scan" : "Start Live Scan"}
+            onPress={isScanning ? handleStopLiveScan : handleStartLiveScan}
+            color={isScanning ? "#c0392b" : undefined}
           />
           {scanResults.length > 0 && (
             <View style={styles.list}>
@@ -206,6 +239,17 @@ export default function App() {
 
         {/* Monitoring */}
         <Section title="Background Monitoring">
+          <View style={styles.row}>
+            <Text style={styles.label}>Max distance (m):</Text>
+            <TextInput
+              style={styles.input}
+              value={maxDistance}
+              onChangeText={setMaxDistance}
+              placeholder="no limit"
+              keyboardType="decimal-pad"
+              editable={!isMonitoring}
+            />
+          </View>
           {!isMonitoring ? (
             <Button
               title="Start Monitoring"
@@ -335,6 +379,22 @@ const styles = StyleSheet.create({
   logEnter: { backgroundColor: "#d5f5e3" },
   logExit: { backgroundColor: "#fadbd8" },
   logInfo: { backgroundColor: "#eaf4fb" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  label: { fontSize: 13, color: "#34495e", marginRight: 8 },
+  input: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#bdc3c7",
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 13,
+    color: "#2c3e50",
+  },
   logTime: { fontSize: 11, color: "#7f8c8d", minWidth: 60 },
   logMsg: { fontSize: 12, color: "#2c3e50", flex: 1 },
 });

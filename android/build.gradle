@@ -1,24 +1,23 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
 
-buildscript {
-  repositories {
-    google()
-    mavenCentral()
+group = 'expo.modules.beacon'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.beacon"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+    minSdkVersion 23
   }
-  dependencies {
-    classpath('com.android.tools.build:gradle')
-    classpath('com.facebook.react:react-native-gradle-plugin')
-    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  lintOptions {
+    abortOnError false
   }
 }
 
-allprojects {
-  repositories {
-    google()
-    mavenCentral()
-    maven { url 'https://www.jitpack.io' }
-  }
+dependencies {
+  implementation 'org.altbeacon:android-beacon-library:2.21.2'
 }
-
-apply plugin: "expo-root-project"
-apply plugin: "com.facebook.react.rootproject"

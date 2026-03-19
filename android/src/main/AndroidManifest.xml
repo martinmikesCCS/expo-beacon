@@ -1,0 +1,57 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Bluetooth permissions (Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT) -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!-- Location permissions required for BLE scanning -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Foreground service for background BLE scanning -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+
+    <!-- Notifications permission (Android 13+) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Receive boot broadcast to restart monitoring after device reboot -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+
+    <application>
+        <!-- AltBeacon background scanning service -->
+        <service
+            android:name="org.altbeacon.beacon.service.BeaconService"
+            android:enabled="true"
+            android:exported="false"
+            android:isolatedProcess="false"
+            android:label="iBeacon Service"
+            tools:replace="android:label" />
+
+        <service
+            android:name="org.altbeacon.beacon.BeaconIntentProcessor"
+            android:exported="false" />
+
+        <!-- Foreground service for sustained background scanning -->
+        <service
+            android:name="expo.modules.beacon.BeaconForegroundService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
+        <!-- Restart monitoring after boot -->
+        <receiver
+            android:name="expo.modules.beacon.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

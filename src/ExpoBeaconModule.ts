@@ -37,13 +37,25 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * Start background region monitoring for all paired beacons.
    * On Android starts a foreground service.
    * On iOS starts CLLocationManager region monitoring.
+   * @param maxDistance Optional distance threshold in metres. Enter events are only
+   *   emitted when the beacon is measured to be within this distance.
+   *   Exit events are always emitted when the beacon region is lost.
    */
-  startMonitoring(): Promise<void>;
+  startMonitoring(maxDistance?: number): Promise<void>;
 
   /**
    * Stop background region monitoring.
    */
   stopMonitoring(): Promise<void>;
+
+  /**
+   * Start a continuous BLE scan. Fires `onBeaconFound` events as beacons are detected.
+   * Call stopContinuousScan() to end the scan.
+   */
+  startContinuousScan(): void;
+
+  /** Stop the continuous scan started by startContinuousScan(). */
+  stopContinuousScan(): void;
 
   /** Request Bluetooth + Location permissions. Returns true if granted. */
   requestPermissionsAsync(): Promise<boolean>;
