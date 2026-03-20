@@ -48,9 +48,9 @@ In Xcode under **Signing & Capabilities**, enable:
 
 > iOS limits apps to **20 simultaneously monitored regions** (iBeacon only — Eddystone beacons are monitored via BLE and do not count toward this limit).
 >
-> **Wildcard scanning**: When you call `scanForBeaconsAsync()` with an empty or omitted `uuids` array, iOS uses CoreBluetooth raw BLE scanning to discover all nearby iBeacons. This works **in the foreground only** — it is an Apple platform limitation. UUID-targeted scans and background monitoring continue to use CoreLocation.
+> **iBeacon scanning on iOS**: Apple strips iBeacon manufacturer data from CoreBluetooth BLE advertisements, so wildcard iBeacon discovery is **not possible** on iOS. You must provide at least one proximity UUID, or pair beacons first (the module will use paired beacon UUIDs automatically). UUID-targeted scans use CoreLocation ranging and work in both foreground and background.
 >
-> **Eddystone scanning**: Eddystone beacons use standard BLE service data (UUID `0xFEAA`), which iOS does not filter. `scanForEddystonesAsync()` and continuous scanning work in the foreground on both platforms.
+> **Eddystone scanning**: Eddystone beacons use standard BLE service data (UUID `0xFEAA`), which iOS does not filter. `scanForEddystonesAsync()` and continuous scanning discover Eddystones on both platforms without restrictions.
 
 ### Android
 
@@ -203,29 +203,29 @@ Starts a **one-shot BLE scan**, waits for `scanDurationMs` milliseconds, then re
 
 | Parameter        | Type       | Default | Description                              |
 | ---------------- | ---------- | ------- | ---------------------------------------- |
-| `uuids`          | `string[]` | `[]`    | Proximity UUIDs to filter by. Pass `[]` or omit for a **wildcard scan** that discovers all nearby iBeacons. |
+| `uuids`          | `string[]` | `[]`    | Proximity UUIDs to filter by. **iOS**: at least one UUID is required (or have paired beacons). **Android**: pass `[]` for a wildcard scan. |
 | `scanDurationMs` | `number`   | `5000`  | How long to scan in milliseconds (1–60 000 recommended) |
 
 Returns an array of [`BeaconScanResult`](#beaconscanresult) objects. Rejects with `SCAN_IN_PROGRESS` if another scan is already running.
 
-**Wildcard vs. targeted scans**
+**Platform differences**
 
-| | Wildcard (`[]` / omitted) | Targeted (`['UUID-1', …]`) |
+| | Empty UUIDs (`[]`) | Targeted (`['UUID-1', …]`) |
 |---|---|---|
 | **Android** | Discovers all iBeacons via AltBeacon | Filters results to matching UUIDs |
-| **iOS** | CoreBluetooth raw BLE scan (**foreground only**) | CoreLocation ranging (works in background) |
+| **iOS** | Uses paired beacon UUIDs automatically. Rejects if no UUIDs and no paired beacons. | CoreLocation ranging (works in foreground & background) |
 
-> **iOS limitation**: Wildcard scanning uses CoreBluetooth, which cannot scan in the background. If your app is backgrounded during a wildcard scan, no new beacons will be discovered. Use UUID-targeted scans or `startMonitoring()` for background beacon detection.
+> **iOS limitation**: Apple strips iBeacon manufacturer data from CoreBluetooth BLE advertisements. Wildcard iBeacon scanning (no UUID filter) is not possible on iOS. When you pass an empty `uuids` array, the module automatically uses UUIDs from your paired beacons. If no beacons are paired, the call rejects with `WILDCARD_NOT_SUPPORTED`. For Eddystone scanning, use `scanForEddystonesAsync()` instead — it works without restrictions on both platforms.
 
 ```ts
-// Wildcard scan — discover all nearby iBeacons
-const all = await ExpoBeacon.scanForBeaconsAsync([], 5000);
-
-// Targeted scan — only beacons matching these UUIDs
+// Scan by UUID — works on both platforms
 const filtered = await ExpoBeacon.scanForBeaconsAsync(
   ['E2C56DB5-DFFB-48D2-B060-D0F5A71096E0'],
   8000,
 );
+
+// Wildcard scan — Android only. On iOS, uses paired beacon UUIDs.
+const all = await ExpoBeacon.scanForBeaconsAsync([], 5000);
 
 filtered.forEach((b) =>
   console.log(`${b.uuid}  major=${b.major}  minor=${b.minor}  dist=${b.distance.toFixed(1)}m  rssi=${b.rssi}dBm`)

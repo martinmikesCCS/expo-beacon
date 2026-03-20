@@ -52,11 +52,9 @@ public class ExpoBeaconModule: Module {
     // Constraints started exclusively for continuous scan (not shared with distance ranging)
     private var continuousScanOnlyConstraints: [CLBeaconIdentityConstraint] = []
 
-    // Wildcard (CoreBluetooth) scan state
+    // CoreBluetooth scan state (Eddystone + monitoring)
     private lazy var bluetoothDelegate = BluetoothDelegate(module: self)
     private var centralManager: CBCentralManager?
-    private var wildcardScannedBeacons: [[String: Any]] = []
-    private var wildcardScanTimer: DispatchWorkItem?
 
     // Eddystone (CoreBluetooth) scan state
     fileprivate var eddystoneScanPromise: Promise?
@@ -450,89 +448,6 @@ public class ExpoBeaconModule: Module {
         scannedBeacons = []
     }
 
-    // MARK: - Wildcard (CoreBluetooth) scan
-
-    private func startWildcardScan(durationMs: Int) {
-        wildcardScannedBeacons = []
-
-        if centralManager == nil {
-            // Creating CBCentralManager triggers a Bluetooth power-on check.
-            // Once .poweredOn, the delegate calls beginWildcardScanning().
-            centralManager = CBCentralManager(delegate: bluetoothDelegate, queue: .main)
-        } else if centralManager?.state == .poweredOn {
-            beginWildcardScanning()
-        }
-        // If state is not yet .poweredOn the delegate will call beginWildcardScanning()
-        // when centralManagerDidUpdateState fires.
-
-        let timer = DispatchWorkItem { [weak self] in
-            self?.stopWildcardScanAndResolve()
-        }
-        wildcardScanTimer = timer
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(durationMs), execute: timer)
-    }
-
-    fileprivate func beginWildcardScanning() {
-        guard scanPromise != nil, wildcardScanTimer != nil else { return }
-        centralManager?.scanForPeripherals(
-            withServices: nil,
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
-        )
-    }
-
-    fileprivate func handleWildcardDiscovery(advertisementData: [String: Any], rssi: NSNumber) {
-        guard let mfgData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
-              mfgData.count >= 25 else { return }
-
-        // iBeacon format: Apple company ID (0x4C 0x00) + type 0x02 + length 0x15
-        guard mfgData[0] == 0x4C, mfgData[1] == 0x00,
-              mfgData[2] == 0x02, mfgData[3] == 0x15 else { return }
-
-        // Parse UUID (bytes 4–19)
-        let uuidBytes = [UInt8](mfgData[4..<20])
-        let uuid = NSUUID(uuidBytes: uuidBytes) as UUID
-
-        // Parse major (bytes 20–21, big-endian) and minor (bytes 22–23, big-endian)
-        let major = Int(UInt16(mfgData[20]) << 8 | UInt16(mfgData[21]))
-        let minor = Int(UInt16(mfgData[22]) << 8 | UInt16(mfgData[23]))
-
-        // TX power (byte 24, signed)
-        let txPower = Int(Int8(bitPattern: mfgData[24]))
-
-        let rssiValue = rssi.intValue
-        let distance = Self.calculateDistance(rssi: rssiValue, txPower: txPower)
-
-        let result: [String: Any] = [
-            "uuid": uuid.uuidString.uppercased(),
-            "major": major,
-            "minor": minor,
-            "rssi": rssiValue,
-            "distance": distance,
-            "txPower": txPower
-        ]
-        wildcardScannedBeacons.append(result)
-    }
-
-    private func stopWildcardScanAndResolve() {
-        wildcardScanTimer?.cancel()
-        wildcardScanTimer = nil
-        stopBleScanIfUnneeded()
-
-        // Deduplicate by uuid:major:minor, keeping the last (freshest) reading
-        var seen = Set<String>()
-        var deduped: [[String: Any]] = []
-        for beacon in wildcardScannedBeacons.reversed() {
-            let key = "\(beacon["uuid"] ?? ""):\(beacon["major"] ?? ""):\(beacon["minor"] ?? "")"
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-            deduped.append(beacon)
-        }
-
-        scanPromise?.resolve(deduped)
-        scanPromise = nil
-        wildcardScannedBeacons = []
-    }
-
     // MARK: - Eddystone Scan
 
     private func startEddystoneScan(durationMs: Int) {
@@ -727,7 +642,7 @@ public class ExpoBeaconModule: Module {
     }
 
     private func stopBleScanIfUnneeded() {
-        guard wildcardScanTimer == nil && eddystoneScanTimer == nil && !continuousScanActive && !eddystoneMonitoringActive else { return }
+        guard eddystoneScanTimer == nil && !continuousScanActive && !eddystoneMonitoringActive else { return }
         centralManager?.stopScan()
     }
 
@@ -755,9 +670,11 @@ public class ExpoBeaconModule: Module {
     }
 
     /// Log-distance path loss model: distance = 10 ^ ((txPower - rssi) / (10 * n)), n = 2.0
+    /// Eddystone txPower is calibrated at 0 m; subtract 41 dB to convert to 1 m reference.
     private static func calculateDistance(rssi: Int, txPower: Int) -> Double {
         guard rssi != 0 else { return -1 }
-        let ratio = Double(txPower - rssi) / 20.0
+        let txPowerAt1m = Double(txPower - 41)
+        let ratio = (txPowerAt1m - Double(rssi)) / 20.0
         return pow(10.0, ratio)
     }
 
@@ -1105,7 +1022,7 @@ private class LocationDelegate: NSObject, CLLocationManagerDelegate {
     }
 }
 
-// MARK: - CBCentralManagerDelegate (wildcard iBeacon scanning)
+// MARK: - CBCentralManagerDelegate (Eddystone BLE scanning)
 
 private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
     private weak var module: ExpoBeaconModule?
@@ -1137,7 +1054,6 @@ private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
                          didDiscover peripheral: CBPeripheral,
                          advertisementData: [String: Any],
                          rssi RSSI: NSNumber) {
-        module?.handleWildcardDiscovery(advertisementData: advertisementData, rssi: RSSI)
         module?.handleEddystoneDiscovery(advertisementData: advertisementData, rssi: RSSI)
     }
 }

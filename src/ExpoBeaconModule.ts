@@ -15,10 +15,12 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * Start a one-shot iBeacon scan. Resolves with discovered beacons after scanDuration ms.
    *
    * Pass one or more UUIDs to scan for specific beacons (uses CoreLocation on iOS).
-   * Pass an empty array or omit to perform a wildcard scan that discovers all nearby
-   * iBeacons (uses CoreBluetooth on iOS — foreground only).
+   * On iOS, at least one UUID is required — Apple strips iBeacon data from BLE
+   * advertisements, making wildcard discovery impossible. When you pass an empty
+   * array, the module automatically uses UUIDs from paired beacons.
+   * On Android, pass an empty array to discover all nearby iBeacons.
    *
-   * @param uuids Proximity UUIDs to filter by. Empty/omitted = wildcard scan.
+   * @param uuids Proximity UUIDs to filter by. Empty/omitted = use paired UUIDs (iOS) or wildcard (Android).
    * @param scanDuration Duration in ms (default 5000)
    */
   scanForBeaconsAsync(
