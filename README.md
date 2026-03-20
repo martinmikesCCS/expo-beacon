@@ -11,7 +11,7 @@ An Expo module for scanning, pairing, and monitoring iBeacons in React Native ap
 | Platform | Native implementation                                                                                     |
 | -------- | --------------------------------------------------------------------------------------------------------- |
 | Android  | [AltBeacon](https://altbeacon.github.io/android-beacon-library/) (`org.altbeacon:android-beacon-library`) |
-| iOS      | CoreLocation / `CLLocationManager` (iBeacon native API)                                                   |
+| iOS      | CoreLocation (UUID-targeted scans & monitoring) + CoreBluetooth (wildcard scanning)                       |
 | Web      | Not supported (throws on all calls)                                                                        |
 
 ---
@@ -47,6 +47,8 @@ In Xcode under **Signing & Capabilities**, enable:
 - **Background Modes → Uses Bluetooth LE accessories**
 
 > iOS limits apps to **20 simultaneously monitored regions**.
+>
+> **Wildcard scanning**: When you call `scanForBeaconsAsync()` with an empty or omitted `uuids` array, iOS uses CoreBluetooth raw BLE scanning to discover all nearby iBeacons. This works **in the foreground only** — it is an Apple platform limitation. UUID-targeted scans and background monitoring continue to use CoreLocation.
 
 ### Android
 
@@ -111,7 +113,8 @@ export default function App() {
   }, []);
 
   async function scan() {
-    const results = await ExpoBeacon.scanForBeaconsAsync(5000);
+    // Wildcard scan — discovers all nearby iBeacons (no UUID filter)
+    const results = await ExpoBeacon.scanForBeaconsAsync([], 5000);
     setBeacons(results);
   }
 
@@ -158,23 +161,41 @@ if (!granted) {
 
 ---
 
-### `scanForBeaconsAsync(scanDurationMs?)`
+### `scanForBeaconsAsync(uuids?, scanDurationMs?)`
 
 ```ts
-scanForBeaconsAsync(scanDurationMs?: number): Promise<BeaconScanResult[]>
+scanForBeaconsAsync(uuids?: string[], scanDurationMs?: number): Promise<BeaconScanResult[]>
 ```
 
 Starts a **one-shot BLE scan**, waits for `scanDurationMs` milliseconds, then resolves with all beacons discovered during that window.
 
-| Parameter       | Type     | Default | Description                              |
-| --------------- | -------- | ------- | ---------------------------------------- |
-| `scanDurationMs`| `number` | `5000`  | How long to scan in milliseconds (1–60 000 recommended) |
+| Parameter        | Type       | Default | Description                              |
+| ---------------- | ---------- | ------- | ---------------------------------------- |
+| `uuids`          | `string[]` | `[]`    | Proximity UUIDs to filter by. Pass `[]` or omit for a **wildcard scan** that discovers all nearby iBeacons. |
+| `scanDurationMs` | `number`   | `5000`  | How long to scan in milliseconds (1–60 000 recommended) |
 
 Returns an array of [`BeaconScanResult`](#beaconscanresult) objects. Rejects with `SCAN_IN_PROGRESS` if another scan is already running.
 
+**Wildcard vs. targeted scans**
+
+| | Wildcard (`[]` / omitted) | Targeted (`['UUID-1', …]`) |
+|---|---|---|
+| **Android** | Discovers all iBeacons via AltBeacon | Filters results to matching UUIDs |
+| **iOS** | CoreBluetooth raw BLE scan (**foreground only**) | CoreLocation ranging (works in background) |
+
+> **iOS limitation**: Wildcard scanning uses CoreBluetooth, which cannot scan in the background. If your app is backgrounded during a wildcard scan, no new beacons will be discovered. Use UUID-targeted scans or `startMonitoring()` for background beacon detection.
+
 ```ts
-const beacons = await ExpoBeacon.scanForBeaconsAsync(8000); // 8-second scan
-beacons.forEach((b) =>
+// Wildcard scan — discover all nearby iBeacons
+const all = await ExpoBeacon.scanForBeaconsAsync([], 5000);
+
+// Targeted scan — only beacons matching these UUIDs
+const filtered = await ExpoBeacon.scanForBeaconsAsync(
+  ['E2C56DB5-DFFB-48D2-B060-D0F5A71096E0'],
+  8000,
+);
+
+filtered.forEach((b) =>
   console.log(`${b.uuid}  major=${b.major}  minor=${b.minor}  dist=${b.distance.toFixed(1)}m  rssi=${b.rssi}dBm`)
 );
 ```
@@ -190,6 +211,8 @@ startContinuousScan(): void
 Begins a **continuous BLE scan** that fires an [`onBeaconFound`](#onbeaconfound) event every time a beacon advertisement is received. Call [`stopContinuousScan()`](#stopcontinuousscan) to end it.
 
 Unlike `scanForBeaconsAsync`, this never resolves — it streams results in real time.
+
+> **iOS note**: Due to CoreLocation API constraints, `startContinuousScan()` on iOS only ranges beacons that have been previously paired with `pairBeacon()`. On Android, all nearby BLE beacons are reported regardless of pairing status.
 
 ```ts
 const sub = ExpoBeacon.addListener("onBeaconFound", (beacon) => {
@@ -420,15 +443,7 @@ ExpoBeacon.addListener("onBeaconExit", (e) => {
 
 ### `onBeaconRanging`
 
-Fired periodically during active monitoring with the latest ranging measurement for a paired beacon.
-
-**Payload**: [`BeaconRangingEvent`](#beaconrangingevent)
-
-```ts
-ExpoBeacon.addListener("onBeaconRanging", (e) => {
-  console.log(`Ranging ${e.identifier}: ${e.distance.toFixed(2)} m  rssi=${e.rssi}`);
-});
-```
+> **Not currently emitted.** This event is declared in the TypeScript types ([`BeaconRangingEvent`](#beaconrangingevent)) but is not fired by either the iOS or Android native implementation. Use [`onBeaconDistance`](#onbeacondistance) for periodic distance updates during monitoring.
 
 ---
 
@@ -507,7 +522,7 @@ type BeaconRegionEvent = {
 
 ### `BeaconRangingEvent`
 
-Payload for `onBeaconRanging`.
+Payload type for the `onBeaconRanging` event. **Declared for future use — this event is not currently emitted by either platform.** Use [`BeaconDistanceEvent`](#beacondistanceevent) and [`onBeaconDistance`](#onbeacondistance) for real-time distance updates.
 
 ```ts
 type BeaconRangingEvent = {
@@ -648,7 +663,7 @@ Both notifications share the channel id `expo_beacon_channel`. The channel is re
 
 ## Contributing
 
-Contributions are welcome! Please refer to the [contributing guide](https://github.com/expo/expo#contributing).
+Contributions are welcome! Open an issue or pull request on [GitHub](https://github.com/martinmikesCCS/expo-beacon).
 
 ## License
 

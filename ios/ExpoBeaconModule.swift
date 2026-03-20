@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import CoreLocation
+import CoreBluetooth
 import UserNotifications
 
 private let PAIRED_BEACONS_KEY = "expo.beacon.paired"
@@ -7,21 +8,30 @@ private let IS_MONITORING_KEY = "expo.beacon.is_monitoring"
 private let MAX_DISTANCE_KEY = "expo.beacon.max_distance"
 private let NOTIFICATION_CONFIG_KEY = "expo.beacon.notification_config"
 
-public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
+/// Number of consecutive ranging misses before emitting a distance-based exit event.
+private let EXIT_MISS_THRESHOLD = 3
+/// Number of consecutive readings required to confirm a distance-based enter or exit transition.
+private let HYSTERESIS_COUNT = 3
+
+public class ExpoBeaconModule: Module {
+
+    private lazy var locationDelegate = LocationDelegate(module: self)
 
     private lazy var locationManager: CLLocationManager = {
         let manager = CLLocationManager()
-        manager.delegate = self
-        manager.allowsBackgroundLocationUpdates = true
+        manager.delegate = locationDelegate
+        let backgroundModes = Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String] ?? []
+        if backgroundModes.contains("location") {
+            manager.allowsBackgroundLocationUpdates = true
+        }
         manager.pausesLocationUpdatesAutomatically = false
         return manager
     }()
 
     // One-shot scan state
-    private var scanPromise: Promise?
+    fileprivate var scanPromise: Promise?
     private var scannedBeacons: [CLBeacon] = []
-    private var scanConstraint: CLBeaconIdentityConstraint?
-    private var scanRegion: CLBeaconRegion?
+    private var scanConstraints: [CLBeaconIdentityConstraint] = []
 
     // Monitored regions
     private var monitoredRegions: [CLBeaconRegion] = []
@@ -30,11 +40,22 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
     private var distanceRangingConstraints: [String: CLBeaconIdentityConstraint] = [:]
     // Identifiers currently in "entered" state (used for distance-driven enter/exit)
     private var enteredRegions: Set<String> = []
+    // Consecutive miss counter per identifier (for distance-based exit when beacon disappears)
+    private var missCounters: [String: Int] = [:]
+    // Hysteresis counters: consecutive readings inside/outside threshold per identifier
+    private var enterCounters: [String: Int] = [:]
+    private var exitCounters: [String: Int] = [:]
 
     // Continuous scan state
     private var continuousScanActive = false
     // Constraints started exclusively for continuous scan (not shared with distance ranging)
     private var continuousScanOnlyConstraints: [CLBeaconIdentityConstraint] = []
+
+    // Wildcard (CoreBluetooth) scan state
+    private lazy var bluetoothDelegate = BluetoothDelegate(module: self)
+    private var centralManager: CBCentralManager?
+    private var wildcardScannedBeacons: [[String: Any]] = []
+    private var wildcardScanTimer: DispatchWorkItem?
 
     // Permission callback
     private var permissionCompletion: ((Bool) -> Void)?
@@ -42,17 +63,37 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
     public func definition() -> ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconRanging", "onBeaconDistance", "onBeaconFound")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound")
 
         // MARK: - Scan
 
-        AsyncFunction("scanForBeaconsAsync") { (scanDurationMs: Int, promise: Promise) in
+        AsyncFunction("scanForBeaconsAsync") { (uuids: [String], scanDurationMs: Int, promise: Promise) in
             guard self.scanPromise == nil else {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already in progress")
                 return
             }
+
             self.scanPromise = promise
+
+            // Wildcard scan (empty UUIDs) — use CoreBluetooth raw BLE scanning
+            if uuids.isEmpty {
+                self.startWildcardScan(durationMs: scanDurationMs)
+                return
+            }
+
+            // UUID-targeted scan — use CoreLocation ranging
+            var parsedUUIDs: [UUID] = []
+            for uuidStr in uuids {
+                guard let uuid = UUID(uuidString: uuidStr) else {
+                    promise.reject("INVALID_UUID", "Invalid UUID: \(uuidStr)")
+                    self.scanPromise = nil
+                    return
+                }
+                parsedUUIDs.append(uuid)
+            }
+
             self.scannedBeacons = []
+            self.scanConstraints = []
 
             self.requestLocationPermission { granted in
                 guard granted else {
@@ -61,12 +102,12 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
                     return
                 }
 
-                // iOS ranging requires a specific UUID; use a placeholder for generic scan
-                let placeholderUUID = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-                let region = CLBeaconRegion(uuid: placeholderUUID, identifier: "scan_wildcard")
-                self.scanRegion = region
-                self.scanConstraint = CLBeaconIdentityConstraint(uuid: placeholderUUID)
-                self.locationManager.startRangingBeacons(satisfying: self.scanConstraint!)
+                // Range for each requested UUID simultaneously
+                for uuid in parsedUUIDs {
+                    let constraint = CLBeaconIdentityConstraint(uuid: uuid)
+                    self.scanConstraints.append(constraint)
+                    self.locationManager.startRangingBeacons(satisfying: constraint)
+                }
 
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(scanDurationMs)) {
                     self.stopScanAndResolve()
@@ -76,7 +117,17 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
 
         // MARK: - Pair
 
-        Function("pairBeacon") { (identifier: String, uuid: String, major: Int, minor: Int) in
+        Function("pairBeacon") { (identifier: String, uuid: String, major: Int, minor: Int) -> Void in
+            guard UUID(uuidString: uuid) != nil else {
+                throw Exception(name: "INVALID_UUID", description: "Invalid UUID format: \(uuid)")
+            }
+            guard (0...65535).contains(major) else {
+                throw Exception(name: "INVALID_MAJOR", description: "Major must be 0–65535, got \(major)")
+            }
+            guard (0...65535).contains(minor) else {
+                throw Exception(name: "INVALID_MINOR", description: "Minor must be 0–65535, got \(minor)")
+            }
+
             var beacons = self.loadPairedBeaconsRaw()
             beacons.removeAll { ($0["identifier"] as? String) == identifier }
             beacons.append([
@@ -109,11 +160,11 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
 
         // MARK: - Monitoring
 
-        AsyncFunction("startMonitoring") { (options: Any?, promise: Promise) in
+        AsyncFunction("startMonitoring") { (options: Either<Double, [String: Any]>?, promise: Promise) in
             var maxDistance: Double? = nil
-            if let dist = options as? Double {
+            if let dist: Double = options?.get() {
                 maxDistance = dist
-            } else if let map = options as? [String: Any] {
+            } else if let map: [String: Any] = options?.get() {
                 maxDistance = map["maxDistance"] as? Double
                 if let notifications = map["notifications"] as? [String: Any],
                    let data = try? JSONSerialization.data(withJSONObject: notifications),
@@ -127,7 +178,7 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
                 UserDefaults.standard.removeObject(forKey: MAX_DISTANCE_KEY)
             }
             UserDefaults.standard.set(true, forKey: IS_MONITORING_KEY)
-            self.requestLocationPermission { granted in
+            self.requestLocationPermission(requireAlways: true) { granted in
                 guard granted else {
                     promise.reject("PERMISSION_DENIED", "Always location permission required for background monitoring")
                     return
@@ -170,17 +221,41 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
 
     // MARK: - Private Helpers
 
-    private func requestLocationPermission(completion: @escaping (Bool) -> Void) {
+    private func requestLocationPermission(requireAlways: Bool = false, completion: @escaping (Bool) -> Void) {
         let status = locationManager.authorizationStatus
         switch status {
         case .authorizedAlways:
             completion(true)
+        case .authorizedWhenInUse:
+            if requireAlways {
+                // Already have whenInUse — request upgrade to always
+                self.permissionCompletion = { granted in
+                    // After the upgrade prompt, only .authorizedAlways counts
+                    let nowStatus = self.locationManager.authorizationStatus
+                    completion(nowStatus == .authorizedAlways)
+                }
+                locationManager.requestAlwaysAuthorization()
+            } else {
+                completion(true)
+            }
         case .notDetermined:
-            self.permissionCompletion = completion
-            locationManager.requestAlwaysAuthorization()
+            // Two-step flow: first request whenInUse, then upgrade to always
+            self.permissionCompletion = { _ in
+                let nowStatus = self.locationManager.authorizationStatus
+                if requireAlways && nowStatus == .authorizedWhenInUse {
+                    // Got provisional whenInUse — request upgrade to always
+                    self.permissionCompletion = { _ in
+                        let finalStatus = self.locationManager.authorizationStatus
+                        completion(finalStatus == .authorizedAlways)
+                    }
+                    self.locationManager.requestAlwaysAuthorization()
+                } else {
+                    completion(nowStatus == .authorizedAlways || nowStatus == .authorizedWhenInUse)
+                }
+            }
+            locationManager.requestWhenInUseAuthorization()
         default:
-            // WhenInUse allows foreground ranging but not background region monitoring
-            completion(status == .authorizedWhenInUse)
+            completion(false)
         }
     }
 
@@ -236,6 +311,9 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         }
         distanceRangingConstraints.removeAll()
         enteredRegions.removeAll()
+        missCounters.removeAll()
+        enterCounters.removeAll()
+        exitCounters.removeAll()
     }
 
     // Start ranging for paired beacons not already covered by distance ranging
@@ -264,11 +342,10 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
     }
 
     private func stopScanAndResolve() {
-        if let constraint = scanConstraint {
+        for constraint in scanConstraints {
             locationManager.stopRangingBeacons(satisfying: constraint)
-            scanConstraint = nil
-            scanRegion = nil
         }
+        scanConstraints.removeAll()
 
         var seen = Set<String>()
         let results: [[String: Any]] = scannedBeacons.compactMap { beacon in
@@ -288,6 +365,96 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         scanPromise?.resolve(results)
         scanPromise = nil
         scannedBeacons = []
+    }
+
+    // MARK: - Wildcard (CoreBluetooth) scan
+
+    private func startWildcardScan(durationMs: Int) {
+        wildcardScannedBeacons = []
+
+        if centralManager == nil {
+            // Creating CBCentralManager triggers a Bluetooth power-on check.
+            // Once .poweredOn, the delegate calls beginWildcardScanning().
+            centralManager = CBCentralManager(delegate: bluetoothDelegate, queue: .main)
+        } else if centralManager?.state == .poweredOn {
+            beginWildcardScanning()
+        }
+        // If state is not yet .poweredOn the delegate will call beginWildcardScanning()
+        // when centralManagerDidUpdateState fires.
+
+        let timer = DispatchWorkItem { [weak self] in
+            self?.stopWildcardScanAndResolve()
+        }
+        wildcardScanTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(durationMs), execute: timer)
+    }
+
+    fileprivate func beginWildcardScanning() {
+        guard scanPromise != nil, wildcardScanTimer != nil else { return }
+        centralManager?.scanForPeripherals(
+            withServices: nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+        )
+    }
+
+    fileprivate func handleWildcardDiscovery(advertisementData: [String: Any], rssi: NSNumber) {
+        guard let mfgData = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data,
+              mfgData.count >= 25 else { return }
+
+        // iBeacon format: Apple company ID (0x4C 0x00) + type 0x02 + length 0x15
+        guard mfgData[0] == 0x4C, mfgData[1] == 0x00,
+              mfgData[2] == 0x02, mfgData[3] == 0x15 else { return }
+
+        // Parse UUID (bytes 4–19)
+        let uuidBytes = [UInt8](mfgData[4..<20])
+        let uuid = NSUUID(uuidBytes: uuidBytes) as UUID
+
+        // Parse major (bytes 20–21, big-endian) and minor (bytes 22–23, big-endian)
+        let major = Int(UInt16(mfgData[20]) << 8 | UInt16(mfgData[21]))
+        let minor = Int(UInt16(mfgData[22]) << 8 | UInt16(mfgData[23]))
+
+        // TX power (byte 24, signed)
+        let txPower = Int(Int8(bitPattern: mfgData[24]))
+
+        let rssiValue = rssi.intValue
+        let distance = Self.calculateDistance(rssi: rssiValue, txPower: txPower)
+
+        let result: [String: Any] = [
+            "uuid": uuid.uuidString.uppercased(),
+            "major": major,
+            "minor": minor,
+            "rssi": rssiValue,
+            "distance": distance,
+            "txPower": txPower
+        ]
+        wildcardScannedBeacons.append(result)
+    }
+
+    private func stopWildcardScanAndResolve() {
+        wildcardScanTimer?.cancel()
+        wildcardScanTimer = nil
+        centralManager?.stopScan()
+
+        // Deduplicate by uuid:major:minor, keeping the last (freshest) reading
+        var seen = Set<String>()
+        var deduped: [[String: Any]] = []
+        for beacon in wildcardScannedBeacons.reversed() {
+            let key = "\(beacon["uuid"] ?? ""):\(beacon["major"] ?? ""):\(beacon["minor"] ?? "")"
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            deduped.append(beacon)
+        }
+
+        scanPromise?.resolve(deduped)
+        scanPromise = nil
+        wildcardScannedBeacons = []
+    }
+
+    /// Log-distance path loss model: distance = 10 ^ ((txPower - rssi) / (10 * n)), n = 2.0
+    private static func calculateDistance(rssi: Int, txPower: Int) -> Double {
+        guard rssi != 0 else { return -1 }
+        let ratio = Double(txPower - rssi) / 20.0
+        return pow(10.0, ratio)
     }
 
     private func loadPairedBeaconsRaw() -> [[String: Any]] {
@@ -342,78 +509,118 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         return a.uuid == b.uuid && a.major == b.major && a.minor == b.minor
     }
 
-    // MARK: - CLLocationManagerDelegate
+    // MARK: - CLLocationManagerDelegate handlers (called by LocationDelegate)
 
-    public func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+    fileprivate func handleDidChangeAuthorization(_ status: CLAuthorizationStatus) {
         let granted = (status == .authorizedAlways || status == .authorizedWhenInUse)
         permissionCompletion?(granted)
         permissionCompletion = nil
     }
 
-    public func locationManager(_ manager: CLLocationManager, didRangeBeacons beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
+    fileprivate func handleDidRange(_ beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
         // 1. One-shot scan mode
-        if let sc = scanConstraint, constraintMatches(sc, constraint) {
+        if scanConstraints.contains(where: { constraintMatches($0, constraint) }) {
             scannedBeacons.append(contentsOf: beacons)
             return
         }
 
         // 2. Distance-ranging for monitored beacons
         if let (identifier, _) = distanceRangingConstraints.first(where: { constraintMatches($0.value, constraint) }) {
-            guard let beacon = beacons.first(where: { $0.accuracy >= 0 }) else {
-                return
-            }
+            let validBeacon = beacons.first(where: { $0.accuracy >= 0 })
 
-            // Emit distance event every ranging cycle (~1 s)
-            let distParams: [String: Any] = [
-                "identifier": identifier,
-                "uuid": beacon.uuid.uuidString.uppercased(),
-                "major": beacon.major.intValue,
-                "minor": beacon.minor.intValue,
-                "distance": beacon.accuracy
-            ]
-            sendEvent("onBeaconDistance", distParams)
-            print("[ExpoBeacon] DIST: \(identifier) → \(String(format: "%.2f", beacon.accuracy))m")
+            if let beacon = validBeacon {
+                // Got a valid reading — reset miss counter
+                missCounters[identifier] = 0
 
-            // Distance-driven enter/exit synthesis
-            if let maxDist = UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) as? Double {
-                if !enteredRegions.contains(identifier) && beacon.accuracy <= maxDist {
-                    enteredRegions.insert(identifier)
-                    let params: [String: Any] = [
-                        "identifier": identifier,
+                // Emit distance event every ranging cycle (~1 s)
+                let distParams: [String: Any] = [
+                    "identifier": identifier,
+                    "uuid": beacon.uuid.uuidString.uppercased(),
+                    "major": beacon.major.intValue,
+                    "minor": beacon.minor.intValue,
+                    "distance": beacon.accuracy
+                ]
+                sendEvent("onBeaconDistance", distParams)
+
+                // Distance-driven enter/exit synthesis with hysteresis
+                if let maxDist = UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) as? Double {
+                    if beacon.accuracy <= maxDist {
+                        // Reading is inside threshold
+                        exitCounters[identifier] = 0
+                        enterCounters[identifier] = (enterCounters[identifier] ?? 0) + 1
+
+                        if !enteredRegions.contains(identifier) && (enterCounters[identifier] ?? 0) >= HYSTERESIS_COUNT {
+                            enteredRegions.insert(identifier)
+                            enterCounters[identifier] = 0
+                            let params: [String: Any] = [
+                                "identifier": identifier,
+                                "uuid": beacon.uuid.uuidString.uppercased(),
+                                "major": beacon.major.intValue,
+                                "minor": beacon.minor.intValue,
+                                "event": "enter",
+                                "distance": beacon.accuracy
+                            ]
+                            sendEvent("onBeaconEnter", params)
+                            postBeaconNotification(identifier: identifier, eventType: "enter")
+                        }
+                    } else {
+                        // Reading is outside threshold
+                        enterCounters[identifier] = 0
+                        exitCounters[identifier] = (exitCounters[identifier] ?? 0) + 1
+
+                        if enteredRegions.contains(identifier) && (exitCounters[identifier] ?? 0) >= HYSTERESIS_COUNT {
+                            enteredRegions.remove(identifier)
+                            exitCounters[identifier] = 0
+                            let params: [String: Any] = [
+                                "identifier": identifier,
+                                "uuid": beacon.uuid.uuidString.uppercased(),
+                                "major": beacon.major.intValue,
+                                "minor": beacon.minor.intValue,
+                                "event": "exit",
+                                "distance": beacon.accuracy
+                            ]
+                            sendEvent("onBeaconExit", params)
+                            postBeaconNotification(identifier: identifier, eventType: "exit")
+                        }
+                    }
+                }
+
+                // Also emit onBeaconFound if continuous scan is active for this beacon
+                if continuousScanActive {
+                    let foundParams: [String: Any] = [
                         "uuid": beacon.uuid.uuidString.uppercased(),
                         "major": beacon.major.intValue,
                         "minor": beacon.minor.intValue,
-                        "event": "enter",
-                        "distance": beacon.accuracy
+                        "rssi": beacon.rssi,
+                        "distance": beacon.accuracy,
+                        "txPower": 0
                     ]
-                    sendEvent("onBeaconEnter", params)
-                    postBeaconNotification(identifier: identifier, eventType: "enter")
-                } else if enteredRegions.contains(identifier) && beacon.accuracy > maxDist {
+                    sendEvent("onBeaconFound", foundParams)
+                }
+            } else {
+                // No valid beacon reading — beacon may have disappeared
+                let count = (missCounters[identifier] ?? 0) + 1
+                missCounters[identifier] = count
+
+                if enteredRegions.contains(identifier) && count >= EXIT_MISS_THRESHOLD {
                     enteredRegions.remove(identifier)
+                    missCounters[identifier] = 0
+                    enterCounters[identifier] = 0
+                    exitCounters[identifier] = 0
+
+                    // Look up region info for the exit event payload
+                    let region = monitoredRegions.first { $0.identifier == identifier }
                     let params: [String: Any] = [
                         "identifier": identifier,
-                        "uuid": beacon.uuid.uuidString.uppercased(),
-                        "major": beacon.major.intValue,
-                        "minor": beacon.minor.intValue,
+                        "uuid": region?.uuid.uuidString.uppercased() ?? "",
+                        "major": region?.major?.intValue ?? 0,
+                        "minor": region?.minor?.intValue ?? 0,
                         "event": "exit",
-                        "distance": beacon.accuracy
+                        "distance": -1
                     ]
                     sendEvent("onBeaconExit", params)
                     postBeaconNotification(identifier: identifier, eventType: "exit")
                 }
-            }
-
-            // Also emit onBeaconFound if continuous scan is active for this beacon
-            if continuousScanActive {
-                let foundParams: [String: Any] = [
-                    "uuid": beacon.uuid.uuidString.uppercased(),
-                    "major": beacon.major.intValue,
-                    "minor": beacon.minor.intValue,
-                    "rssi": beacon.rssi,
-                    "distance": beacon.accuracy,
-                    "txPower": 0
-                ]
-                sendEvent("onBeaconFound", foundParams)
             }
             return
         }
@@ -435,7 +642,7 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         }
     }
 
-    public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+    fileprivate func handleDidEnterRegion(_ region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
         let identifier = beaconRegion.identifier
 
@@ -454,7 +661,7 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         postBeaconNotification(identifier: identifier, eventType: "enter")
     }
 
-    public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+    fileprivate func handleDidExitRegion(_ region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
         let identifier = beaconRegion.identifier
 
@@ -476,8 +683,90 @@ public class ExpoBeaconModule: NSObject, Module, CLLocationManagerDelegate {
         postBeaconNotification(identifier: identifier, eventType: "exit")
     }
 
-    public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+    fileprivate func handleMonitoringDidFail(for region: CLRegion?, withError error: Error) {
         print("[ExpoBeacon] Monitoring failed for region \(region?.identifier ?? "unknown"): \(error.localizedDescription)")
+    }
+
+    fileprivate func handleDidFailRanging(for constraint: CLBeaconIdentityConstraint, error: Error) {
+        print("[ExpoBeacon] Ranging failed for constraint \(constraint.uuid): \(error.localizedDescription)")
+
+        // If a one-shot scan is active and this constraint belongs to it, reject the promise
+        if scanPromise != nil && scanConstraints.contains(where: { constraintMatches($0, constraint) }) {
+            // Stop all scan constraints
+            for sc in scanConstraints {
+                locationManager.stopRangingBeacons(satisfying: sc)
+            }
+            scanConstraints.removeAll()
+            scannedBeacons.removeAll()
+            scanPromise?.reject("RANGING_FAILED", "Beacon ranging failed: \(error.localizedDescription)")
+            scanPromise = nil
+        }
+    }
+}
+
+// MARK: - CLLocationManagerDelegate
+
+private class LocationDelegate: NSObject, CLLocationManagerDelegate {
+    private weak var module: ExpoBeaconModule?
+
+    init(module: ExpoBeaconModule) {
+        self.module = module
+    }
+
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        module?.handleDidChangeAuthorization(status)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didRange beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
+        module?.handleDidRange(beacons, satisfying: constraint)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        module?.handleDidEnterRegion(region)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+        module?.handleDidExitRegion(region)
+    }
+
+    func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+        module?.handleMonitoringDidFail(for: region, withError: error)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailRangingFor beaconConstraint: CLBeaconIdentityConstraint, error: Error) {
+        module?.handleDidFailRanging(for: beaconConstraint, error: error)
+    }
+}
+
+// MARK: - CBCentralManagerDelegate (wildcard iBeacon scanning)
+
+private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
+    private weak var module: ExpoBeaconModule?
+
+    init(module: ExpoBeaconModule) {
+        self.module = module
+    }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        switch central.state {
+        case .poweredOn:
+            module?.beginWildcardScanning()
+        case .unauthorized:
+            module?.scanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
+            module?.scanPromise = nil
+        case .poweredOff:
+            module?.scanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
+            module?.scanPromise = nil
+        default:
+            break
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager,
+                         didDiscover peripheral: CBPeripheral,
+                         advertisementData: [String: Any],
+                         rssi RSSI: NSNumber) {
+        module?.handleWildcardDiscovery(advertisementData: advertisementData, rssi: RSSI)
     }
 }
 

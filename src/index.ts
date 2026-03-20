@@ -6,7 +6,6 @@ export type {
   BeaconScanResult,
   PairedBeacon,
   BeaconRegionEvent,
-  BeaconRangingEvent,
   BeaconDistanceEvent,
   ExpoBeaconModuleEvents,
   NotificationConfig,

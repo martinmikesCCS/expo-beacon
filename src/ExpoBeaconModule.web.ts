@@ -9,8 +9,10 @@ const notSupported = (): never => {
 };
 
 const stub = {
-  scanForBeaconsAsync: (_scanDuration?: number): Promise<BeaconScanResult[]> =>
-    notSupported(),
+  scanForBeaconsAsync: (
+    _uuids: string[],
+    _scanDuration?: number,
+  ): Promise<BeaconScanResult[]> => notSupported(),
   pairBeacon: (
     _identifier: string,
     _uuid: string,

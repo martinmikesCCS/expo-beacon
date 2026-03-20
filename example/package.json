@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "expo": "~55.0.8",
-    "react": "^19.2.0",
-    "react-native": "0.83.2"
+    "react": "^19.2.4",
+    "react-native": "^0.83.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",

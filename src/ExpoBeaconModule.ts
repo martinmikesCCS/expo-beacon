@@ -10,10 +10,19 @@ import {
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /**
-   * Start a one-shot BLE scan. Resolves with discovered beacons after scanDuration ms.
+   * Start a one-shot iBeacon scan. Resolves with discovered beacons after scanDuration ms.
+   *
+   * Pass one or more UUIDs to scan for specific beacons (uses CoreLocation on iOS).
+   * Pass an empty array or omit to perform a wildcard scan that discovers all nearby
+   * iBeacons (uses CoreBluetooth on iOS — foreground only).
+   *
+   * @param uuids Proximity UUIDs to filter by. Empty/omitted = wildcard scan.
    * @param scanDuration Duration in ms (default 5000)
    */
-  scanForBeaconsAsync(scanDuration?: number): Promise<BeaconScanResult[]>;
+  scanForBeaconsAsync(
+    uuids?: string[],
+    scanDuration?: number,
+  ): Promise<BeaconScanResult[]>;
 
   /**
    * Register a beacon for persistent region monitoring.

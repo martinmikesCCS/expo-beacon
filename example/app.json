@@ -13,7 +13,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "expo.modules.beacon.example"
+      "bundleIdentifier": "expo.modules.beacon.example",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"],
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to detect nearby beacons.",
+        "NSLocationAlwaysUsageDescription": "This app uses your location in the background to detect nearby beacons.",
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to detect nearby beacons."
+      }
     },
     "android": {
       "adaptiveIcon": {

@@ -52,6 +52,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     private var scanPromise: Promise? = null
     private var scanJob: Job? = null
     private val scanResults = mutableListOf<Beacon>()
+    private var scanUuidFilter: Set<String> = emptySet()
     private var isBoundForScan = false
 
     // Continuous scan state
@@ -61,14 +62,15 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     override fun definition() = ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconRanging", "onBeaconDistance", "onBeaconFound")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound")
 
-        AsyncFunction("scanForBeaconsAsync") { scanDurationMs: Int, promise: Promise ->
+        AsyncFunction("scanForBeaconsAsync") { uuids: List<String>?, scanDurationMs: Int, promise: Promise ->
             if (scanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
                 return@AsyncFunction
             }
             scanResults.clear()
+            scanUuidFilter = uuids?.map { it.lowercase() }?.toSet() ?: emptySet()
             scanPromise = promise
 
             beaconManager.addRangeNotifier(scanRangeNotifier)
@@ -113,6 +115,19 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         Function("pairBeacon") { identifier: String, uuid: String, major: Int, minor: Int ->
+            // Validate UUID format
+            try {
+                java.util.UUID.fromString(uuid)
+            } catch (_: IllegalArgumentException) {
+                throw expo.modules.kotlin.exception.CodedException("INVALID_UUID", "Invalid UUID format: $uuid", null)
+            }
+            if (major !in 0..65535) {
+                throw expo.modules.kotlin.exception.CodedException("INVALID_MAJOR", "Major must be 0\u201365535, got $major", null)
+            }
+            if (minor !in 0..65535) {
+                throw expo.modules.kotlin.exception.CodedException("INVALID_MINOR", "Minor must be 0\u201365535, got $minor", null)
+            }
+
             val beacons = loadPairedBeaconsJson()
             // Remove duplicate if exists
             val filtered = (0 until beacons.length())
@@ -176,6 +191,15 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     if (maxDistance != null) putFloat("max_distance", maxDistance.toFloat())
                     else remove("max_distance")
                 }.apply()
+            // Verify we have the permissions needed for background monitoring
+            val hasLocation = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            val hasBgLocation = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+                ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!hasLocation || !hasBgLocation) {
+                promise.reject("PERMISSION_DENIED", "Location permissions required for background monitoring. Call requestPermissionsAsync() first.", null)
+                return@AsyncFunction
+            }
+
             registerEventReceiver()
             BeaconForegroundService.start(ctx)
             promise.resolve(null)
@@ -195,7 +219,8 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         AsyncFunction("requestPermissionsAsync") { promise: Promise ->
-            val required = buildList {
+            // Step 1: request foreground permissions
+            val foreground = buildList {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     add(Manifest.permission.BLUETOOTH_SCAN)
@@ -212,7 +237,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     promise.resolve(false)
                     return@AsyncFunction
                 }
-                val allGranted = required.all {
+                val allGranted = foreground.all {
                     ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
                 }
                 promise.resolve(allGranted)
@@ -220,11 +245,24 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
 
             permissionsManager.askForPermissions({ results ->
-                val allGranted = required.all { perm ->
+                val fgGranted = foreground.all { perm ->
                     results[perm]?.status == PermissionsStatus.GRANTED
                 }
-                promise.resolve(allGranted)
-            }, *required.toTypedArray())
+                if (!fgGranted) {
+                    promise.resolve(false)
+                    return@askForPermissions
+                }
+                // Step 2: request background location (Android 10+)
+                // Must be requested separately after foreground location is granted
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    permissionsManager.askForPermissions({ bgResults ->
+                        val bgGranted = bgResults[Manifest.permission.ACCESS_BACKGROUND_LOCATION]?.status == PermissionsStatus.GRANTED
+                        promise.resolve(bgGranted)
+                    }, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                } else {
+                    promise.resolve(true)
+                }
+            }, *foreground.toTypedArray())
         }
 
         OnDestroy {
@@ -266,7 +304,13 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     }
 
     private val scanRangeNotifier = RangeNotifier { beacons, _ ->
-        scanResults.addAll(beacons)
+        if (scanUuidFilter.isEmpty()) {
+            scanResults.addAll(beacons)
+        } else {
+            scanResults.addAll(beacons.filter { beacon ->
+                scanUuidFilter.contains(beacon.id1.toString().lowercase())
+            })
+        }
     }
 
     private val continuousScanRangeNotifier = RangeNotifier { beacons, _ ->
@@ -309,6 +353,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
         scanPromise?.resolve(results)
         scanPromise = null
+        scanUuidFilter = emptySet()
     }
 
     // --- Notification config helpers ---

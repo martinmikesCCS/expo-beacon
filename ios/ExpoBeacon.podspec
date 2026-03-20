@@ -19,7 +19,7 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
 
-  # Required system frameworks for iBeacon monitoring
+  # Required system frameworks for iBeacon monitoring + wildcard BLE scanning
   s.frameworks = 'CoreLocation', 'CoreBluetooth', 'UserNotifications'
 
   # Swift/Objective-C compatibility
