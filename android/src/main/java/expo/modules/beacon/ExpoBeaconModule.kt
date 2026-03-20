@@ -264,12 +264,14 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 return@AsyncFunction
             }
             var maxDistance: Double? = null
+            var exitDistance: Double? = null
             when (options) {
                 is Double -> maxDistance = options
                 is Map<*, *> -> {
                     @Suppress("UNCHECKED_CAST")
                     val map = options as Map<String, Any?>
                     maxDistance = (map["maxDistance"] as? Number)?.toDouble()
+                    exitDistance = (map["exitDistance"] as? Number)?.toDouble()
                     val notifications = map["notifications"]
                     if (notifications is Map<*, *>) {
                         @Suppress("UNCHECKED_CAST")
@@ -282,6 +284,8 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 .edit().apply {
                     if (maxDistance != null) putString("max_distance", maxDistance.toString())
                     else remove("max_distance")
+                    if (exitDistance != null) putString("exit_distance", exitDistance.toString())
+                    else remove("exit_distance")
                 }.apply()
             // Verify we have the permissions needed for background monitoring
             val hasLocation = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED

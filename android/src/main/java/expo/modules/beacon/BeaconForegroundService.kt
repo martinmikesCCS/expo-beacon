@@ -31,6 +31,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     // Distance filtering
     @Volatile private var maxDistance: Double? = null
+    @Volatile private var exitDistance: Double? = null
     private val rangingRegions = java.util.concurrent.CopyOnWriteArraySet<Region>()
     private val enteredRegions = java.util.concurrent.CopyOnWriteArraySet<String>()
 
@@ -101,9 +102,10 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     override fun onBeaconServiceConnect() {
-        // Read max distance from options prefs
+        // Read max distance and exit distance from options prefs
         val optPrefs = getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
         maxDistance = optPrefs.getString("max_distance", null)?.toDoubleOrNull()
+        exitDistance = optPrefs.getString("exit_distance", null)?.toDoubleOrNull()
 
         beaconManager.addMonitorNotifier(monitorNotifier)
         beaconManager.addRangeNotifier(rangeNotifier)
@@ -297,6 +299,15 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     private enum class HysteresisAction { NONE, ENTER, EXIT }
 
     /**
+     * Computes the effective exit distance from maxDistance and an optional explicit exitDistance.
+     * Default: maxDistance + min(maxDistance × 0.5, 2.5).
+     */
+    private fun effectiveExitDistance(maxDist: Double): Double {
+        exitDistance?.let { return it }
+        return maxDist + minOf(maxDist * 0.5, 2.5)
+    }
+
+    /**
      * Evaluate distance-based enter/exit with hysteresis counters.
      * Must be called within synchronized(distanceLock).
      * Mirrors [ExpoBeaconModule.swift evaluateDistanceHysteresis].
@@ -306,8 +317,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         distance: Double,
         maxDist: Double
     ): HysteresisAction {
+        val exitDist = effectiveExitDistance(maxDist)
         if (distance <= maxDist) {
-            // Inside threshold
+            // Inside enter threshold
             exitCounters[regionId] = 0
             val count = (enterCounters[regionId] ?: 0) + 1
             enterCounters[regionId] = count
@@ -315,8 +327,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 enterCounters[regionId] = 0
                 return HysteresisAction.ENTER
             }
-        } else {
-            // Outside threshold
+        } else if (distance > exitDist) {
+            // Outside exit threshold
             enterCounters[regionId] = 0
             val count = (exitCounters[regionId] ?: 0) + 1
             exitCounters[regionId] = count
@@ -324,6 +336,10 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 exitCounters[regionId] = 0
                 return HysteresisAction.EXIT
             }
+        } else {
+            // In the hysteresis band (maxDist < distance <= exitDist) — do nothing
+            enterCounters[regionId] = 0
+            exitCounters[regionId] = 0
         }
         return HysteresisAction.NONE
     }

@@ -100,6 +100,15 @@ export type MonitoringOptions = {
    * Exit events are always emitted when the region is lost.
    */
   maxDistance?: number;
+  /**
+   * Distance in metres at which exit events fire (must be ≥ maxDistance).
+   * Creates a hysteresis band between enter and exit thresholds to prevent
+   * rapid toggling near the boundary.
+   *
+   * Default when omitted: `maxDistance + min(maxDistance × 0.5, 2.5)`.
+   * Only used when `maxDistance` is set.
+   */
+  exitDistance?: number;
   /** Notification configuration overrides to apply for this monitoring session. */
   notifications?: NotificationConfig;
 };

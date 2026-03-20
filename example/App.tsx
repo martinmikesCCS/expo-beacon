@@ -8,6 +8,7 @@ import {
   View,
   Button,
   TouchableOpacity,
+  Switch,
   Platform,
 } from "react-native";
 import ExpoBeacon from "expo-beacon";
@@ -30,14 +31,30 @@ interface EventLogEntry {
 }
 
 export default function App() {
-  const [isScanning, setIsScanning] = useState(false);
-  const [isMonitoring, setIsMonitoring] = useState(false);
-  const [maxDistance, setMaxDistance] = useState("");
+  // Scan state
+  const [isLiveScanning, setIsLiveScanning] = useState(false);
+  const [isOneShotScanning, setIsOneShotScanning] = useState(false);
   const [scanResults, setScanResults] = useState<BeaconScanResult[]>([]);
   const [eddystoneResults, setEddystoneResults] = useState<EddystoneScanResult[]>([]);
+  const [scanUuid, setScanUuid] = useState("");
+  const [scanDuration, setScanDuration] = useState("5000");
+
+  // Monitoring state
+  const [isMonitoring, setIsMonitoring] = useState(false);
+  const [maxDistance, setMaxDistance] = useState("");
+  const [exitDistanceInput, setExitDistanceInput] = useState("");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [enterTitle, setEnterTitle] = useState("Beacon nearby!");
+  const [exitTitle, setExitTitle] = useState("Beacon out of range");
+
+  // Paired beacons
   const [pairedBeacons, setPairedBeacons] = useState<PairedBeacon[]>([]);
   const [pairedEddystones, setPairedEddystones] = useState<PairedEddystone[]>([]);
+
+  // Event log
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
+
+  // Refs for continuous scan subscriptions
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
   const eddystoneScanSubRef = useRef<{ remove: () => void } | null>(null);
   const logIdRef = useRef(0);
@@ -60,12 +77,15 @@ export default function App() {
     [],
   );
 
-  // Subscribe to enter/exit/distance events
+  // Subscribe to monitoring enter/exit/distance events
   useEffect(() => {
     const enterSub = ExpoBeacon.addListener(
       "onBeaconEnter",
       (event: BeaconRegionEvent) => {
-        addLog(`ENTERED: ${event.identifier} (${event.uuid})`, "enter");
+        addLog(
+          `ENTERED: ${event.identifier} (${event.uuid}) at ~${event.distance >= 0 ? event.distance.toFixed(1) + "m" : "n/a"}`,
+          "enter",
+        );
       },
     );
     const exitSub = ExpoBeacon.addListener(
@@ -77,26 +97,38 @@ export default function App() {
     const distSub = ExpoBeacon.addListener(
       "onBeaconDistance",
       (event: BeaconDistanceEvent) => {
-        addLog(`DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`, "info");
+        addLog(
+          `DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`,
+          "info",
+        );
       },
     );
 
     const eddyEnterSub = ExpoBeacon.addListener(
       "onEddystoneEnter",
       (event: EddystoneRegionEvent) => {
-        addLog(`EDDY ENTERED: ${event.identifier} (${event.namespace})`, "enter");
+        addLog(
+          `EDDY ENTERED: ${event.identifier} (${event.namespace})`,
+          "enter",
+        );
       },
     );
     const eddyExitSub = ExpoBeacon.addListener(
       "onEddystoneExit",
       (event: EddystoneRegionEvent) => {
-        addLog(`EDDY EXITED: ${event.identifier} (${event.namespace})`, "exit");
+        addLog(
+          `EDDY EXITED: ${event.identifier} (${event.namespace})`,
+          "exit",
+        );
       },
     );
     const eddyDistSub = ExpoBeacon.addListener(
       "onEddystoneDistance",
       (event: EddystoneDistanceEvent) => {
-        addLog(`EDDY DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`, "info");
+        addLog(
+          `EDDY DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`,
+          "info",
+        );
       },
     );
 
@@ -116,11 +148,11 @@ export default function App() {
   }, []);
 
   const refreshPairedBeacons = () => {
-    const paired = ExpoBeacon.getPairedBeacons();
-    setPairedBeacons(paired);
-    const pairedEddy = ExpoBeacon.getPairedEddystones();
-    setPairedEddystones(pairedEddy);
+    setPairedBeacons(ExpoBeacon.getPairedBeacons());
+    setPairedEddystones(ExpoBeacon.getPairedEddystones());
   };
+
+  // ── Permissions ──
 
   const handleRequestPermissions = async () => {
     try {
@@ -131,11 +163,57 @@ export default function App() {
     }
   };
 
+  // ── One-shot Scan (scanForBeaconsAsync / scanForEddystonesAsync) ──
+
+  const handleOneShotScan = async () => {
+    const durationMs = parseInt(scanDuration, 10) || 5000;
+    const uuids = scanUuid.trim() ? [scanUuid.trim()] : [];
+
+    setIsOneShotScanning(true);
+    setScanResults([]);
+    setEddystoneResults([]);
+    addLog(
+      `One-shot scan started (${durationMs}ms)` +
+        (uuids.length > 0 ? ` UUID: ${uuids[0].slice(0, 8)}…` : " (wildcard)"),
+    );
+
+    try {
+      // Run iBeacon and Eddystone scans in parallel
+      const [beacons, eddystones] = await Promise.all([
+        ExpoBeacon.scanForBeaconsAsync(uuids, durationMs),
+        ExpoBeacon.scanForEddystonesAsync(durationMs),
+      ]);
+
+      setScanResults(beacons);
+      setEddystoneResults(eddystones);
+      addLog(
+        `One-shot scan complete: ${beacons.length} iBeacon(s), ${eddystones.length} Eddystone(s)`,
+      );
+    } catch (e: any) {
+      if (e.code === "SCAN_CANCELLED") {
+        addLog("Scan cancelled");
+      } else {
+        addLog(`Scan error: ${e.message}`);
+      }
+    } finally {
+      setIsOneShotScanning(false);
+    }
+  };
+
+  const handleCancelScan = () => {
+    ExpoBeacon.cancelScan();
+    addLog("Cancelling scan...");
+  };
+
+  // ── Continuous (Live) Scan ──
+
   const handleStartLiveScan = () => {
     setScanResults([]);
     setEddystoneResults([]);
-    setIsScanning(true);
+    setIsLiveScanning(true);
     addLog("Live scan started...");
+
+    // Subscribe to onBeaconFound for iBeacon advertisements
     liveScanSubRef.current = ExpoBeacon.addListener(
       "onBeaconFound",
       (beacon: BeaconScanResult) => {
@@ -153,17 +231,21 @@ export default function App() {
         });
       },
     );
+
+    // Subscribe to onEddystoneFound for Eddystone advertisements
     eddystoneScanSubRef.current = ExpoBeacon.addListener(
       "onEddystoneFound",
       (beacon: EddystoneScanResult) => {
         setEddystoneResults((prev) => {
-          const key = beacon.frameType === "uid"
-            ? `${beacon.namespace}-${beacon.instance}`
-            : `url-${beacon.url}`;
+          const key =
+            beacon.frameType === "uid"
+              ? `${beacon.namespace}-${beacon.instance}`
+              : `url-${beacon.url}`;
           const idx = prev.findIndex((b) => {
-            const k = b.frameType === "uid"
-              ? `${b.namespace}-${b.instance}`
-              : `url-${b.url}`;
+            const k =
+              b.frameType === "uid"
+                ? `${b.namespace}-${b.instance}`
+                : `url-${b.url}`;
             return k === key;
           });
           if (idx >= 0) {
@@ -175,6 +257,7 @@ export default function App() {
         });
       },
     );
+
     ExpoBeacon.startContinuousScan();
   };
 
@@ -184,13 +267,20 @@ export default function App() {
     liveScanSubRef.current = null;
     eddystoneScanSubRef.current?.remove();
     eddystoneScanSubRef.current = null;
-    setIsScanning(false);
+    setIsLiveScanning(false);
     addLog("Live scan stopped");
   };
 
+  // ── Pairing ──
+
   const handlePair = (beacon: BeaconScanResult) => {
     const identifier = `beacon-${beacon.uuid.slice(0, 8)}-${beacon.major}-${beacon.minor}`;
-    ExpoBeacon.pairBeacon(identifier, beacon.uuid, beacon.major, beacon.minor);
+    ExpoBeacon.pairBeacon(
+      identifier,
+      beacon.uuid,
+      beacon.major,
+      beacon.minor,
+    );
     refreshPairedBeacons();
     addLog(`Paired: ${identifier}`);
   };
@@ -202,7 +292,8 @@ export default function App() {
   };
 
   const handlePairEddystone = (beacon: EddystoneScanResult) => {
-    if (beacon.frameType !== "uid" || !beacon.namespace || !beacon.instance) return;
+    if (beacon.frameType !== "uid" || !beacon.namespace || !beacon.instance)
+      return;
     const identifier = `eddy-${beacon.namespace.slice(0, 8)}-${beacon.instance}`;
     ExpoBeacon.pairEddystone(identifier, beacon.namespace, beacon.instance);
     refreshPairedBeacons();
@@ -215,15 +306,44 @@ export default function App() {
     addLog(`Unpaired Eddystone: ${identifier}`);
   };
 
+  // ── Monitoring with MonitoringOptions ──
+
   const handleStartMonitoring = async () => {
     try {
-      const dist = maxDistance.trim() !== "" ? parseFloat(maxDistance) : undefined;
-      await ExpoBeacon.startMonitoring(dist);
+      const dist =
+        maxDistance.trim() !== "" ? parseFloat(maxDistance) : undefined;
+      const exitDist =
+        exitDistanceInput.trim() !== "" ? parseFloat(exitDistanceInput) : undefined;
+
+      // Use the full MonitoringOptions object as documented in the README
+      await ExpoBeacon.startMonitoring({
+        maxDistance: dist,
+        exitDistance: exitDist,
+        notifications: {
+          beaconEvents: {
+            enabled: notificationsEnabled,
+            enterTitle,
+            exitTitle,
+            body: "{identifier} {event}ed",
+          },
+          foregroundService: {
+            title: "expo-beacon example",
+            text: "Monitoring for nearby beacons",
+          },
+          channel: {
+            name: "Beacon Alerts",
+            description: "Beacon enter/exit notifications",
+            importance: "default",
+          },
+        },
+      });
+
       setIsMonitoring(true);
       addLog(
-        dist !== undefined
-          ? `Background monitoring started ✓ (≤${dist}m)`
-          : "Background monitoring started ✓"
+        `Monitoring started ✓` +
+          (dist !== undefined ? ` (enter ≤${dist}m` +
+            (exitDist !== undefined ? `, exit >${exitDist}m)` : `)`) : "") +
+          (notificationsEnabled ? "" : " (notifications off)"),
       );
     } catch (e: any) {
       addLog(`Monitor error: ${e.message}`);
@@ -240,12 +360,26 @@ export default function App() {
     }
   };
 
+  // ── Notification Config (persistent) ──
+
+  const handleApplyNotificationConfig = () => {
+    ExpoBeacon.setNotificationConfig({
+      beaconEvents: {
+        enabled: notificationsEnabled,
+        enterTitle,
+        exitTitle,
+        body: "{identifier} {event}ed",
+      },
+    });
+    addLog("Notification config updated ✓");
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>expo-beacon</Text>
 
-        {/* Permissions */}
+        {/* ── Permissions ── */}
         <Section title="Permissions">
           <Button
             title="Request Bluetooth & Location"
@@ -253,14 +387,71 @@ export default function App() {
           />
         </Section>
 
-        {/* Scan */}
-        <Section title="Scan for Beacons">
+        {/* ── One-Shot Scan ── */}
+        <Section title="One-Shot Scan">
+          <Text style={styles.hint}>
+            Runs scanForBeaconsAsync + scanForEddystonesAsync in parallel
+          </Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>UUID filter:</Text>
+            <TextInput
+              style={styles.input}
+              value={scanUuid}
+              onChangeText={setScanUuid}
+              placeholder="empty = wildcard (Android) / paired UUIDs (iOS)"
+              autoCapitalize="characters"
+              editable={!isOneShotScanning}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Duration (ms):</Text>
+            <TextInput
+              style={[styles.input, { maxWidth: 100 }]}
+              value={scanDuration}
+              onChangeText={setScanDuration}
+              placeholder="5000"
+              keyboardType="number-pad"
+              editable={!isOneShotScanning}
+            />
+          </View>
+          <View style={styles.buttonRow}>
+            <View style={styles.buttonFlex}>
+              <Button
+                title={isOneShotScanning ? "Scanning…" : "Start One-Shot Scan"}
+                onPress={handleOneShotScan}
+                disabled={isOneShotScanning || isLiveScanning}
+              />
+            </View>
+            {isOneShotScanning && (
+              <View style={styles.buttonFlex}>
+                <Button
+                  title="Cancel"
+                  onPress={handleCancelScan}
+                  color="#c0392b"
+                />
+              </View>
+            )}
+          </View>
+        </Section>
+
+        {/* ── Continuous (Live) Scan ── */}
+        <Section title="Continuous (Live) Scan">
+          <Text style={styles.hint}>
+            Streams onBeaconFound & onEddystoneFound events in real time
+          </Text>
           <Button
-            title={isScanning ? "Stop Live Scan" : "Start Live Scan"}
-            onPress={isScanning ? handleStopLiveScan : handleStartLiveScan}
-            color={isScanning ? "#c0392b" : undefined}
+            title={isLiveScanning ? "Stop Live Scan" : "Start Live Scan"}
+            onPress={isLiveScanning ? handleStopLiveScan : handleStartLiveScan}
+            color={isLiveScanning ? "#c0392b" : undefined}
+            disabled={isOneShotScanning}
           />
-          {scanResults.length > 0 && (
+        </Section>
+
+        {/* ── iBeacon Results ── */}
+        <Section
+          title={`iBeacon Results (${scanResults.length})`}
+        >
+          {scanResults.length > 0 ? (
             <View style={styles.list}>
               {scanResults.map((b, idx) => (
                 <View key={idx} style={styles.card}>
@@ -269,7 +460,8 @@ export default function App() {
                     Major: {b.major} · Minor: {b.minor}
                   </Text>
                   <Text style={styles.cardMeta}>
-                    RSSI: {b.rssi} dBm · ~{b.distance.toFixed(1)}m
+                    RSSI: {b.rssi} dBm · ~{b.distance.toFixed(1)}m · TX:{" "}
+                    {b.txPower}
                   </Text>
                   <TouchableOpacity
                     style={styles.pairBtn}
@@ -280,15 +472,16 @@ export default function App() {
                 </View>
               ))}
             </View>
-          )}
-          {scanResults.length === 0 && !isScanning && (
-            <Text style={styles.empty}>No beacons found yet</Text>
+          ) : (
+            <Text style={styles.empty}>No iBeacons found yet</Text>
           )}
         </Section>
 
-        {/* Eddystone Beacons */}
-        <Section title="Eddystone Beacons">
-          {eddystoneResults.length > 0 && (
+        {/* ── Eddystone Results ── */}
+        <Section
+          title={`Eddystone Results (${eddystoneResults.length})`}
+        >
+          {eddystoneResults.length > 0 ? (
             <View style={styles.list}>
               {eddystoneResults.map((b, idx) => (
                 <View key={idx} style={styles.card}>
@@ -298,37 +491,43 @@ export default function App() {
                   {b.frameType === "uid" ? (
                     <>
                       <Text style={styles.cardMeta}>NS: {b.namespace}</Text>
-                      <Text style={styles.cardMeta}>Instance: {b.instance}</Text>
+                      <Text style={styles.cardMeta}>
+                        Instance: {b.instance}
+                      </Text>
                     </>
                   ) : (
                     <Text style={styles.cardMeta}>URL: {b.url}</Text>
                   )}
                   <Text style={styles.cardMeta}>
-                    RSSI: {b.rssi} dBm · ~{b.distance.toFixed(1)}m
+                    RSSI: {b.rssi} dBm · ~{b.distance.toFixed(1)}m · TX:{" "}
+                    {b.txPower}
                   </Text>
                   {b.frameType === "uid" && (
                     <TouchableOpacity
                       style={styles.pairBtn}
                       onPress={() => handlePairEddystone(b)}
                     >
-                      <Text style={styles.pairBtnText}>Pair this Eddystone</Text>
+                      <Text style={styles.pairBtnText}>
+                        Pair this Eddystone
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
               ))}
             </View>
-          )}
-          {eddystoneResults.length === 0 && (
-            <Text style={styles.empty}>
-              {isScanning ? "Scanning..." : "No Eddystone beacons found yet"}
-            </Text>
+          ) : (
+            <Text style={styles.empty}>No Eddystone beacons found yet</Text>
           )}
         </Section>
 
-        {/* Paired Beacons */}
-        <Section title={`Paired Beacons (${pairedBeacons.length + pairedEddystones.length})`}>
+        {/* ── Paired Beacons ── */}
+        <Section
+          title={`Paired Beacons (${pairedBeacons.length + pairedEddystones.length})`}
+        >
           {pairedBeacons.length === 0 && pairedEddystones.length === 0 ? (
-            <Text style={styles.empty}>No paired beacons</Text>
+            <Text style={styles.empty}>
+              No paired beacons — scan and tap "Pair" to add
+            </Text>
           ) : (
             <>
               {pairedBeacons.map((b) => (
@@ -363,15 +562,66 @@ export default function App() {
           )}
         </Section>
 
-        {/* Monitoring */}
+        {/* ── Notification Config ── */}
+        <Section title="Notification Config">
+          <Text style={styles.hint}>
+            Persisted via setNotificationConfig() — survives app restarts
+          </Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Enabled:</Text>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={setNotificationsEnabled}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Enter title:</Text>
+            <TextInput
+              style={styles.input}
+              value={enterTitle}
+              onChangeText={setEnterTitle}
+              placeholder="Beacon nearby!"
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Exit title:</Text>
+            <TextInput
+              style={styles.input}
+              value={exitTitle}
+              onChangeText={setExitTitle}
+              placeholder="Beacon out of range"
+            />
+          </View>
+          <Button
+            title="Apply Notification Config"
+            onPress={handleApplyNotificationConfig}
+          />
+        </Section>
+
+        {/* ── Background Monitoring ── */}
         <Section title="Background Monitoring">
+          <Text style={styles.hint}>
+            Monitors all paired beacons (iBeacon + Eddystone) using
+            MonitoringOptions
+          </Text>
           <View style={styles.row}>
             <Text style={styles.label}>Max distance (m):</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, { maxWidth: 100 }]}
               value={maxDistance}
               onChangeText={setMaxDistance}
               placeholder="no limit"
+              keyboardType="decimal-pad"
+              editable={!isMonitoring}
+            />
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Exit distance (m):</Text>
+            <TextInput
+              style={[styles.input, { maxWidth: 100 }]}
+              value={exitDistanceInput}
+              onChangeText={setExitDistanceInput}
+              placeholder="auto"
               keyboardType="decimal-pad"
               editable={!isMonitoring}
             />
@@ -380,7 +630,9 @@ export default function App() {
             <Button
               title="Start Monitoring"
               onPress={handleStartMonitoring}
-              disabled={pairedBeacons.length === 0 && pairedEddystones.length === 0}
+              disabled={
+                pairedBeacons.length === 0 && pairedEddystones.length === 0
+              }
             />
           ) : (
             <Button
@@ -389,6 +641,9 @@ export default function App() {
               color="#c0392b"
             />
           )}
+          {pairedBeacons.length === 0 && pairedEddystones.length === 0 && (
+            <Text style={styles.hint}>Pair at least one beacon first</Text>
+          )}
           {isMonitoring && (
             <View style={styles.statusBadge}>
               <Text style={styles.statusText}>● Monitoring Active</Text>
@@ -396,8 +651,15 @@ export default function App() {
           )}
         </Section>
 
-        {/* Event Log */}
+        {/* ── Event Log ── */}
         <Section title="Event Log">
+          {eventLog.length > 0 && (
+            <Button
+              title="Clear Log"
+              onPress={() => setEventLog([])}
+              color="#95a5a6"
+            />
+          )}
           {eventLog.length === 0 ? (
             <Text style={styles.empty}>No events yet</Text>
           ) : (
@@ -441,7 +703,7 @@ function Section({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f5f5f5" },
-  scroll: { padding: 16 },
+  scroll: { padding: 16, paddingBottom: 40 },
   title: {
     fontSize: 24,
     fontWeight: "bold",
@@ -464,6 +726,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginBottom: 12,
     color: "#34495e",
+  },
+  hint: {
+    fontSize: 12,
+    color: "#95a5a6",
+    marginBottom: 10,
+    fontStyle: "italic",
   },
   list: { marginTop: 12 },
   card: {
@@ -510,6 +778,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
+  buttonRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  buttonFlex: { flex: 1 },
   label: { fontSize: 13, color: "#34495e", marginRight: 8 },
   input: {
     flex: 1,

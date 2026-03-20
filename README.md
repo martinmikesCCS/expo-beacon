@@ -832,6 +832,7 @@ Accepts a `MonitoringOptions` object, a plain `number` (shorthand for `maxDistan
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `maxDistance` | `number` | `undefined` | Distance threshold in metres. `onBeaconEnter` / `onEddystoneEnter` only fires when measured distance ≤ this value. `onBeaconExit` / `onEddystoneExit` always fires. Omit to disable filtering. |
+| `exitDistance` | `number` | `maxDistance + min(maxDistance × 0.5, 2.5)` | Distance in metres at which exit events fire. Must be ≥ `maxDistance`. Creates a hysteresis band between enter and exit thresholds to prevent rapid toggling near the boundary. Only used when `maxDistance` is set. |
 | `notifications` | `NotificationConfig` | `undefined` | Notification overrides for this session (persisted). |
 
 **What happens on each platform**:
@@ -847,9 +848,10 @@ Accepts a `MonitoringOptions` object, a plain `number` (shorthand for `maxDistan
 // Shorthand — just a distance threshold
 await ExpoBeacon.startMonitoring(5);
 
-// Full options
+// Full options with custom exit threshold
 await ExpoBeacon.startMonitoring({
   maxDistance: 10,
+  exitDistance: 15, // Exit fires when distance exceeds 15m
   notifications: {
     beaconEvents: {
       enterTitle: "Welcome!",
@@ -1181,6 +1183,7 @@ Passed to `startMonitoring()`.
 ```ts
 type MonitoringOptions = {
   maxDistance?: number;
+  exitDistance?: number;
   notifications?: NotificationConfig;
 };
 ```

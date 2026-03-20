@@ -8,6 +8,7 @@ private let PAIRED_BEACONS_KEY = "expo.beacon.paired"
 private let PAIRED_EDDYSTONES_KEY = "expo.beacon.paired_eddystones"
 private let IS_MONITORING_KEY = "expo.beacon.is_monitoring"
 private let MAX_DISTANCE_KEY = "expo.beacon.max_distance"
+private let EXIT_DISTANCE_KEY = "expo.beacon.exit_distance"
 private let NOTIFICATION_CONFIG_KEY = "expo.beacon.notification_config"
 
 /// Number of consecutive ranging misses before emitting a distance-based exit event.
@@ -282,10 +283,12 @@ public class ExpoBeaconModule: Module {
 
         AsyncFunction("startMonitoring") { (options: Either<Double, [String: Any]>?, promise: Promise) in
             var maxDistance: Double? = nil
+            var exitDistance: Double? = nil
             if let dist: Double = options?.get() {
                 maxDistance = dist
             } else if let map: [String: Any] = options?.get() {
                 maxDistance = map["maxDistance"] as? Double
+                exitDistance = map["exitDistance"] as? Double
                 if let notifications = map["notifications"] as? [String: Any],
                    let data = try? JSONSerialization.data(withJSONObject: notifications),
                    let json = String(data: data, encoding: .utf8) {
@@ -296,6 +299,11 @@ public class ExpoBeaconModule: Module {
                 self.defaults.set(dist, forKey: MAX_DISTANCE_KEY)
             } else {
                 self.defaults.removeObject(forKey: MAX_DISTANCE_KEY)
+            }
+            if let exitDist = exitDistance {
+                self.defaults.set(exitDist, forKey: EXIT_DISTANCE_KEY)
+            } else {
+                self.defaults.removeObject(forKey: EXIT_DISTANCE_KEY)
             }
             self.defaults.set(true, forKey: IS_MONITORING_KEY)
             self.requestLocationPermission(requireAlways: true) { granted in
@@ -312,6 +320,7 @@ public class ExpoBeaconModule: Module {
         AsyncFunction("stopMonitoring") { (promise: Promise) in
             self.defaults.set(false, forKey: IS_MONITORING_KEY)
             self.defaults.removeObject(forKey: MAX_DISTANCE_KEY)
+            self.defaults.removeObject(forKey: EXIT_DISTANCE_KEY)
             self.stopRegionMonitoring()
             promise.resolve(nil)
         }
@@ -674,10 +683,12 @@ public class ExpoBeaconModule: Module {
 
             // Distance-driven enter/exit with hysteresis
             let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
+            let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
             let action = evaluateDistanceHysteresis(
                 identifier: identifier,
                 distance: distance,
                 maxDistance: maxDist,
+                exitDistance: exitDist,
                 entered: &eddystoneEnteredRegions,
                 enterCtrs: &eddystoneEnterCounters,
                 exitCtrs: &eddystoneExitCounters
@@ -921,17 +932,26 @@ public class ExpoBeaconModule: Module {
         case none, enter, exit
     }
 
+    /// Computes the effective exit distance from maxDistance and an optional explicit exitDistance.
+    /// Default: maxDistance + min(maxDistance × 0.5, 2.5).
+    private static func effectiveExitDistance(maxDistance: Double, exitDistance: Double?) -> Double {
+        if let explicit = exitDistance { return explicit }
+        return maxDistance + min(maxDistance * 0.5, 2.5)
+    }
+
     /// Shared distance-based enter/exit evaluation with hysteresis.
     /// Used by both iBeacon (handleDidRange) and Eddystone (handleEddystoneDiscovery) paths.
     private func evaluateDistanceHysteresis(
         identifier: String,
         distance: Double,
         maxDistance: Double?,
+        exitDistance: Double?,
         entered: inout Set<String>,
         enterCtrs: inout [String: Int],
         exitCtrs: inout [String: Int]
     ) -> HysteresisAction {
         if let maxDist = maxDistance {
+            let exitDist = Self.effectiveExitDistance(maxDistance: maxDist, exitDistance: exitDistance)
             if distance <= maxDist {
                 exitCtrs[identifier] = 0
                 enterCtrs[identifier] = (enterCtrs[identifier] ?? 0) + 1
@@ -940,7 +960,7 @@ public class ExpoBeaconModule: Module {
                     enterCtrs[identifier] = 0
                     return .enter
                 }
-            } else {
+            } else if distance > exitDist {
                 enterCtrs[identifier] = 0
                 exitCtrs[identifier] = (exitCtrs[identifier] ?? 0) + 1
                 if entered.contains(identifier) && (exitCtrs[identifier] ?? 0) >= HYSTERESIS_COUNT {
@@ -948,6 +968,10 @@ public class ExpoBeaconModule: Module {
                     exitCtrs[identifier] = 0
                     return .exit
                 }
+            } else {
+                // In the hysteresis band (maxDist < distance <= exitDist) — do nothing
+                enterCtrs[identifier] = 0
+                exitCtrs[identifier] = 0
             }
         } else {
             enterCtrs[identifier] = (enterCtrs[identifier] ?? 0) + 1
@@ -1020,10 +1044,12 @@ public class ExpoBeaconModule: Module {
 
                 // Distance-driven enter/exit synthesis with hysteresis
                 if let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double {
+                    let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
                     let action = evaluateDistanceHysteresis(
                         identifier: identifier,
                         distance: beacon.accuracy,
                         maxDistance: maxDist,
+                        exitDistance: exitDist,
                         entered: &enteredRegions,
                         enterCtrs: &enterCounters,
                         exitCtrs: &exitCounters
