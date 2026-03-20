@@ -1,8 +1,8 @@
 # expo-beacon
 
-An Expo module for scanning, pairing, and monitoring iBeacons in React Native apps.
+An Expo module for scanning, pairing, and monitoring iBeacons and Eddystone beacons in React Native apps.
 
-- **Scan** for nearby iBeacons via a one-shot or continuous BLE scan
+- **Scan** for nearby iBeacons and Eddystone beacons via one-shot or continuous BLE scans
 - **Pair** specific beacons for persistent tracking across app restarts
 - **Monitor** paired beacons in the background with enter/exit callbacks
 - **Distance events** fired continuously while a monitored beacon is in range
@@ -11,7 +11,7 @@ An Expo module for scanning, pairing, and monitoring iBeacons in React Native ap
 | Platform | Native implementation                                                                                     |
 | -------- | --------------------------------------------------------------------------------------------------------- |
 | Android  | [AltBeacon](https://altbeacon.github.io/android-beacon-library/) (`org.altbeacon:android-beacon-library`) |
-| iOS      | CoreLocation (UUID-targeted scans & monitoring) + CoreBluetooth (wildcard scanning)                       |
+| iOS      | CoreLocation (UUID-targeted scans & monitoring) + CoreBluetooth (wildcard scanning & Eddystone)           |
 | Web      | Not supported (throws on all calls)                                                                        |
 
 ---
@@ -46,9 +46,11 @@ In Xcode under **Signing & Capabilities**, enable:
 - **Background Modes → Location updates**
 - **Background Modes → Uses Bluetooth LE accessories**
 
-> iOS limits apps to **20 simultaneously monitored regions**.
+> iOS limits apps to **20 simultaneously monitored regions** (iBeacon only — Eddystone beacons are monitored via BLE and do not count toward this limit).
 >
 > **Wildcard scanning**: When you call `scanForBeaconsAsync()` with an empty or omitted `uuids` array, iOS uses CoreBluetooth raw BLE scanning to discover all nearby iBeacons. This works **in the foreground only** — it is an Apple platform limitation. UUID-targeted scans and background monitoring continue to use CoreLocation.
+>
+> **Eddystone scanning**: Eddystone beacons use standard BLE service data (UUID `0xFEAA`), which iOS does not filter. `scanForEddystonesAsync()` and continuous scanning work in the foreground on both platforms.
 
 ### Android
 
@@ -70,13 +72,16 @@ import type {
   BeaconScanResult,
   BeaconRegionEvent,
   BeaconDistanceEvent,
+  EddystoneScanResult,
+  EddystoneRegionEvent,
+  EddystoneDistanceEvent,
 } from "expo-beacon";
 
 export default function App() {
   const [beacons, setBeacons] = useState<BeaconScanResult[]>([]);
 
   useEffect(() => {
-    // 1. Pair a known beacon for monitoring
+    // 1. Pair a known iBeacon for monitoring
     ExpoBeacon.pairBeacon(
       "lobby-entrance",
       "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0",
@@ -84,7 +89,14 @@ export default function App() {
       100,
     );
 
-    // 2. Subscribe to region events
+    // 1b. Pair a known Eddystone-UID beacon for monitoring
+    ExpoBeacon.pairEddystone(
+      "meeting-room",
+      "edd1ebeac04e5defa017", // 10-byte namespace
+      "0123456789ab",         // 6-byte instance
+    );
+
+    // 2. Subscribe to iBeacon region events
     const enterSub = ExpoBeacon.addListener(
       "onBeaconEnter",
       (e: BeaconRegionEvent) =>
@@ -99,7 +111,24 @@ export default function App() {
         console.log(`${e.identifier}: ${e.distance.toFixed(2)} m`),
     );
 
-    // 3. Start background monitoring (only fires for paired beacons)
+    // 3. Subscribe to Eddystone region events
+    const eddyEnterSub = ExpoBeacon.addListener(
+      "onEddystoneEnter",
+      (e: EddystoneRegionEvent) =>
+        console.log(`Eddystone entered ${e.identifier} (${e.namespace})`),
+    );
+    const eddyExitSub = ExpoBeacon.addListener(
+      "onEddystoneExit",
+      (e: EddystoneRegionEvent) =>
+        console.log(`Eddystone exited ${e.identifier}`),
+    );
+    const eddyDistSub = ExpoBeacon.addListener(
+      "onEddystoneDistance",
+      (e: EddystoneDistanceEvent) =>
+        console.log(`Eddystone ${e.identifier}: ${e.distance.toFixed(2)} m`),
+    );
+
+    // 4. Start background monitoring (fires for both paired iBeacons and Eddystones)
     ExpoBeacon.requestPermissionsAsync().then((granted) => {
       if (granted) ExpoBeacon.startMonitoring(10); // enter events within 10 m
     });
@@ -108,6 +137,9 @@ export default function App() {
       enterSub.remove();
       exitSub.remove();
       distSub.remove();
+      eddyEnterSub.remove();
+      eddyExitSub.remove();
+      eddyDistSub.remove();
       ExpoBeacon.stopMonitoring();
     };
   }, []);
@@ -210,13 +242,16 @@ startContinuousScan(): void
 
 Begins a **continuous BLE scan** that fires an [`onBeaconFound`](#onbeaconfound) event every time a beacon advertisement is received. Call [`stopContinuousScan()`](#stopcontinuousscan) to end it.
 
-Unlike `scanForBeaconsAsync`, this never resolves — it streams results in real time.
+Unlike `scanForBeaconsAsync`, this never resolves — it streams results in real time. Eddystone beacons are also reported via the [`onEddystoneFound`](#oneddystonefound) event.
 
-> **iOS note**: Due to CoreLocation API constraints, `startContinuousScan()` on iOS only ranges beacons that have been previously paired with `pairBeacon()`. On Android, all nearby BLE beacons are reported regardless of pairing status.
+ **iOS note**: Due to CoreLocation API constraints, `startContinuousScan()` on iOS only ranges iBeacons that have been previously paired with `pairBeacon()`. On Android, all nearby BLE beacons are reported regardless of pairing status. Eddystone beacons are discovered on both platforms via CoreBluetooth / AltBeacon regardless of pairing.
 
 ```ts
 const sub = ExpoBeacon.addListener("onBeaconFound", (beacon) => {
   console.log("Live:", beacon.uuid, beacon.distance);
+});
+const eddySub = ExpoBeacon.addListener("onEddystoneFound", (beacon) => {
+  console.log("Eddystone:", beacon.frameType, beacon.namespace ?? beacon.url);
 });
 
 ExpoBeacon.startContinuousScan();
@@ -224,6 +259,7 @@ ExpoBeacon.startContinuousScan();
 // later, when done:
 ExpoBeacon.stopContinuousScan();
 sub.remove();
+eddySub.remove();
 ```
 
 ---
@@ -299,13 +335,99 @@ paired.forEach((b) =>
 
 ---
 
+### `scanForEddystonesAsync(scanDurationMs?)`
+
+```ts
+scanForEddystonesAsync(scanDurationMs?: number): Promise<EddystoneScanResult[]>
+```
+
+Starts a **one-shot BLE scan** for Eddystone beacons, waits for `scanDurationMs` milliseconds, then resolves with all Eddystone beacons discovered.
+
+| Parameter        | Type     | Default | Description                                    |
+| ---------------- | -------- | ------- | ---------------------------------------------- |
+| `scanDurationMs` | `number` | `5000`  | How long to scan in milliseconds               |
+
+Returns an array of [`EddystoneScanResult`](#eddystonescanresult) objects. Discovers both Eddystone-UID and Eddystone-URL frames.
+
+```ts
+const eddystones = await ExpoBeacon.scanForEddystonesAsync(5000);
+eddystones.forEach((b) => {
+  if (b.frameType === "uid") {
+    console.log(`UID: ns=${b.namespace} inst=${b.instance} dist=${b.distance.toFixed(1)}m`);
+  } else {
+    console.log(`URL: ${b.url} dist=${b.distance.toFixed(1)}m`);
+  }
+});
+```
+
+---
+
+### `pairEddystone(identifier, namespace, instance)`
+
+```ts
+pairEddystone(identifier: string, namespace: string, instance: string): void
+```
+
+Registers an Eddystone-UID beacon for persistent region monitoring. Paired Eddystones survive app restarts (stored in `SharedPreferences` on Android, `UserDefaults` on iOS). Calling `pairEddystone` with an existing `identifier` replaces that entry.
+
+| Parameter    | Type     | Description                                                      |
+| ------------ | -------- | ---------------------------------------------------------------- |
+| `identifier` | `string` | Your unique label for this beacon (e.g. `"meeting-room"`)        |
+| `namespace`  | `string` | 10-byte namespace ID as a hex string (20 characters)             |
+| `instance`   | `string` | 6-byte instance ID as a hex string (12 characters)               |
+
+```ts
+ExpoBeacon.pairEddystone(
+  "meeting-room",
+  "edd1ebeac04e5defa017",
+  "0123456789ab",
+);
+```
+
+---
+
+### `unpairEddystone(identifier)`
+
+```ts
+unpairEddystone(identifier: string): void
+```
+
+Removes a previously paired Eddystone beacon.
+
+| Parameter    | Type     | Description                        |
+| ------------ | -------- | ---------------------------------- |
+| `identifier` | `string` | The label used when pairing        |
+
+```ts
+ExpoBeacon.unpairEddystone("meeting-room");
+```
+
+---
+
+### `getPairedEddystones()`
+
+```ts
+getPairedEddystones(): PairedEddystone[]
+```
+
+Returns the list of all currently paired Eddystone beacons from persistent storage.
+
+```ts
+const paired = ExpoBeacon.getPairedEddystones();
+paired.forEach((e) =>
+  console.log(e.identifier, e.namespace, e.instance)
+);
+```
+
+---
+
 ### `startMonitoring(options?)`
 
 ```ts
 startMonitoring(options?: MonitoringOptions | number): Promise<void>
 ```
 
-Starts background region monitoring for all paired beacons.
+Starts background region monitoring for all paired beacons (both iBeacons and Eddystones).
 
 Accepts either a `MonitoringOptions` object or a plain `number` (backward-compatible shorthand for `maxDistance`).
 
@@ -463,13 +585,73 @@ ExpoBeacon.addListener("onBeaconDistance", (e) => {
 
 ### `onBeaconFound`
 
-Fired during a **continuous scan** (started with `startContinuousScan()`) each time a beacon advertisement is received.
+Fired during a **continuous scan** (started with `startContinuousScan()`) each time an iBeacon advertisement is received.
 
 **Payload**: [`BeaconScanResult`](#beaconscanresult)
 
 ```ts
 ExpoBeacon.addListener("onBeaconFound", (b) => {
   console.log(`Found ${b.uuid} ${b.major}/${b.minor} at ${b.distance.toFixed(1)} m`);
+});
+```
+
+---
+
+### `onEddystoneFound`
+
+Fired during a **continuous scan** (started with `startContinuousScan()`) each time an Eddystone advertisement is received.
+
+**Payload**: [`EddystoneScanResult`](#eddystonescanresult)
+
+```ts
+ExpoBeacon.addListener("onEddystoneFound", (b) => {
+  if (b.frameType === "uid") {
+    console.log(`Eddystone-UID: ${b.namespace}/${b.instance} at ${b.distance.toFixed(1)} m`);
+  } else {
+    console.log(`Eddystone-URL: ${b.url}`);
+  }
+});
+```
+
+---
+
+### `onEddystoneEnter`
+
+Fired when a paired Eddystone-UID beacon enters range during monitoring. If `maxDistance` was set in `startMonitoring`, this only fires when the measured distance is within that threshold.
+
+**Payload**: [`EddystoneRegionEvent`](#eddystoneregionevent)
+
+```ts
+ExpoBeacon.addListener("onEddystoneEnter", (e) => {
+  console.log(`Eddystone entered "${e.identifier}" (ns: ${e.namespace}) at ~${e.distance.toFixed(1)} m`);
+});
+```
+
+---
+
+### `onEddystoneExit`
+
+Fired when a paired Eddystone-UID beacon leaves range during monitoring.
+
+**Payload**: [`EddystoneRegionEvent`](#eddystoneregionevent)
+
+```ts
+ExpoBeacon.addListener("onEddystoneExit", (e) => {
+  console.log(`Eddystone left "${e.identifier}"`);
+});
+```
+
+---
+
+### `onEddystoneDistance`
+
+Fired continuously during monitoring whenever a distance update is received for a paired Eddystone beacon (~1 update/sec).
+
+**Payload**: [`EddystoneDistanceEvent`](#eddystonedistanceevent)
+
+```ts
+ExpoBeacon.addListener("onEddystoneDistance", (e) => {
+  console.log(`Eddystone ${e.identifier}: ${e.distance.toFixed(2)} m`);
 });
 ```
 
@@ -545,6 +727,61 @@ type BeaconDistanceEvent = {
   uuid: string;
   major: number;
   minor: number;
+  distance: number;  // Estimated distance in metres
+};
+```
+
+### `EddystoneScanResult`
+
+Returned by `scanForEddystonesAsync` and used in `onEddystoneFound` events.
+
+```ts
+type EddystoneScanResult = {
+  frameType: "uid" | "url";
+  namespace?: string;  // 10-byte hex string (20 chars). Present for UID frames.
+  instance?: string;   // 6-byte hex string (12 chars). Present for UID frames.
+  url?: string;        // Decoded URL. Present for URL frames.
+  rssi: number;        // Signal strength in dBm
+  distance: number;    // Estimated distance in metres
+  txPower: number;     // Calibrated TX power
+};
+```
+
+### `PairedEddystone`
+
+Returned by `getPairedEddystones`.
+
+```ts
+type PairedEddystone = {
+  identifier: string;  // Your label
+  namespace: string;   // 10-byte hex string (20 chars)
+  instance: string;    // 6-byte hex string (12 chars)
+};
+```
+
+### `EddystoneRegionEvent`
+
+Payload for `onEddystoneEnter` and `onEddystoneExit`.
+
+```ts
+type EddystoneRegionEvent = {
+  identifier: string;         // Matches PairedEddystone.identifier
+  namespace: string;
+  instance: string;
+  event: "enter" | "exit";
+  distance: number;           // Measured distance in metres at event time; –1 if unavailable
+};
+```
+
+### `EddystoneDistanceEvent`
+
+Payload for `onEddystoneDistance`.
+
+```ts
+type EddystoneDistanceEvent = {
+  identifier: string;
+  namespace: string;
+  instance: string;
   distance: number;  // Estimated distance in metres
 };
 ```
@@ -626,15 +863,17 @@ Default scan timing: 1.1 s scan window every 5 s.
 
 ### iOS
 
-`startMonitoring()` activates `CLLocationManager` **region monitoring**. iOS can wake or relaunch the app when the device crosses a region boundary, even if the app has been force-quit. `allowsBackgroundLocationUpdates` is `true` and `pausesLocationUpdatesAutomatically` is `false`.
+`startMonitoring()` activates `CLLocationManager` **region monitoring** for paired iBeacons. iOS can wake or relaunch the app when the device crosses a region boundary, even if the app has been force-quit. `allowsBackgroundLocationUpdates` is `true` and `pausesLocationUpdatesAutomatically` is `false`.
 
-> iOS limits apps to **20 simultaneously monitored regions**.
+For paired Eddystone beacons, iOS uses **CoreBluetooth BLE scanning** during monitoring. BLE scanning works reliably in the foreground and while the app is backgrounded with `Uses Bluetooth LE accessories` background mode enabled. However, BLE scanning may be throttled or stopped by iOS when the app is suspended.
+
+> iOS limits apps to **20 simultaneously monitored regions** (iBeacon only — Eddystone monitoring does not count toward this limit).
 
 ---
 
 ## Notifications
 
-A local notification is posted for every `onBeaconEnter` and `onBeaconExit` event. All notification settings can be customised via [`setNotificationConfig()`](#setnotificationconfigconfig) or inline in [`startMonitoring(options)`](#startmonitoringoptions).
+A local notification is posted for every beacon enter and exit event (both iBeacon and Eddystone). All notification settings can be customised via [`setNotificationConfig()`](#setnotificationconfigconfig) or inline in [`startMonitoring(options)`](#startmonitoringoptions).
 
 ### Defaults
 
