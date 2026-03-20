@@ -513,8 +513,11 @@ public class ExpoBeaconModule: Module {
 
     fileprivate func handleDidChangeAuthorization(_ status: CLAuthorizationStatus) {
         let granted = (status == .authorizedAlways || status == .authorizedWhenInUse)
-        permissionCompletion?(granted)
+        // Nil out BEFORE calling so the closure can set a new permissionCompletion
+        // (e.g. the notDetermined → whenInUse → always two-step upgrade flow).
+        let completion = permissionCompletion
         permissionCompletion = nil
+        completion?(granted)
     }
 
     fileprivate func handleDidRange(_ beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
@@ -713,8 +716,8 @@ private class LocationDelegate: NSObject, CLLocationManagerDelegate {
         self.module = module
     }
 
-    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
-        module?.handleDidChangeAuthorization(status)
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        module?.handleDidChangeAuthorization(manager.authorizationStatus)
     }
 
     func locationManager(_ manager: CLLocationManager, didRange beacons: [CLBeacon], satisfying constraint: CLBeaconIdentityConstraint) {
