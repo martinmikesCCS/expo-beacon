@@ -99,11 +99,60 @@ export type MonitoringOptions = {
   notifications?: NotificationConfig;
 };
 
+/** Eddystone frame type. */
+export type EddystoneFrameType = "uid" | "url";
+
+/** Raw Eddystone beacon discovered during a scan. */
+export type EddystoneScanResult = {
+  frameType: EddystoneFrameType;
+  /** 10-byte namespace ID as hex string (20 chars). Present for UID frames. */
+  namespace?: string;
+  /** 6-byte instance ID as hex string (12 chars). Present for UID frames. */
+  instance?: string;
+  /** Decoded URL. Present for URL frames. */
+  url?: string;
+  rssi: number;
+  distance: number;
+  txPower: number;
+};
+
+/** An Eddystone-UID beacon that has been paired/registered for monitoring. */
+export type PairedEddystone = {
+  identifier: string;
+  /** 10-byte namespace ID as hex string (20 chars). */
+  namespace: string;
+  /** 6-byte instance ID as hex string (12 chars). */
+  instance: string;
+};
+
+/** Payload for Eddystone enter/exit region events. */
+export type EddystoneRegionEvent = {
+  identifier: string;
+  namespace: string;
+  instance: string;
+  event: "enter" | "exit";
+  /** Measured distance in metres at the time of the event (–1 if unavailable). */
+  distance: number;
+};
+
+/** Payload for periodic Eddystone distance update events during monitoring. */
+export type EddystoneDistanceEvent = {
+  identifier: string;
+  namespace: string;
+  instance: string;
+  distance: number;
+};
+
 /** Module event map. */
 export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;
   onBeaconExit: (params: BeaconRegionEvent) => void;
   onBeaconDistance: (params: BeaconDistanceEvent) => void;
-  /** Fired continuously during a live scan as each beacon is detected. */
+  /** Fired continuously during a live scan as each iBeacon is detected. */
   onBeaconFound: (params: BeaconScanResult) => void;
+  /** Fired continuously during a live scan as each Eddystone beacon is detected. */
+  onEddystoneFound: (params: EddystoneScanResult) => void;
+  onEddystoneEnter: (params: EddystoneRegionEvent) => void;
+  onEddystoneExit: (params: EddystoneRegionEvent) => void;
+  onEddystoneDistance: (params: EddystoneDistanceEvent) => void;
 };

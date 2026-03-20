@@ -21,6 +21,8 @@ import org.json.JSONObject
 
 private const val PREFS_NAME = "expo.beacon.paired"
 private const val PREFS_KEY = "paired_beacons"
+private const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
+private const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
 private const val NOTIFICATION_CONFIG_PREFS = "expo.beacon.notification_config"
 
 class ExpoBeaconModule : Module(), BeaconConsumer {
@@ -35,11 +37,27 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
                 )
             }
+            // Register Eddystone-UID parser
+            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=00") == true }) {
+                manager.beaconParsers.add(
+                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=00,p:3-3:-41,i:4-13,i:14-19")
+                )
+            }
+            // Register Eddystone-URL parser
+            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=10") == true }) {
+                manager.beaconParsers.add(
+                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=10,p:3-3:-41,i:4-20v")
+                )
+            }
         }
     }
 
     private val prefs: SharedPreferences by lazy {
         appContext.reactContext!!.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    private val eddystonePrefs: SharedPreferences by lazy {
+        appContext.reactContext!!.getSharedPreferences(EDDYSTONE_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     // Coroutine scope tied to module lifecycle
@@ -50,6 +68,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
     // Current one-shot scan state
     private var scanPromise: Promise? = null
+    private var eddystoneScanPromise: Promise? = null
     private var scanJob: Job? = null
     private val scanResults = mutableListOf<Beacon>()
     private var scanUuidFilter: Set<String> = emptySet()
@@ -62,10 +81,10 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     override fun definition() = ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance")
 
         AsyncFunction("scanForBeaconsAsync") { uuids: List<String>?, scanDurationMs: Int, promise: Promise ->
-            if (scanPromise != null) {
+            if (scanPromise != null || eddystoneScanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
                 return@AsyncFunction
             }
@@ -112,6 +131,29 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 beaconManager.removeRangeNotifier(continuousScanRangeNotifier)
             }
             null
+        }
+
+        AsyncFunction("scanForEddystonesAsync") { scanDurationMs: Int, promise: Promise ->
+            if (scanPromise != null || eddystoneScanPromise != null) {
+                promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
+                return@AsyncFunction
+            }
+            scanResults.clear()
+            eddystoneScanPromise = promise
+
+            beaconManager.addRangeNotifier(scanRangeNotifier)
+
+            if (!isBoundForScan) {
+                isBoundForScan = true
+                beaconManager.bind(this@ExpoBeaconModule)
+            } else {
+                startScanRanging()
+            }
+
+            scanJob = moduleScope.launch {
+                delay(scanDurationMs.toLong())
+                stopEddystoneScanAndResolve()
+            }
         }
 
         Function("pairBeacon") { identifier: String, uuid: String, major: Int, minor: Int ->
@@ -165,6 +207,45 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     "uuid" to b.getString("uuid"),
                     "major" to b.getInt("major"),
                     "minor" to b.getInt("minor")
+                )
+            }
+        }
+
+        Function("pairEddystone") { identifier: String, namespace: String, instance: String ->
+            val eddystones = loadPairedEddystonesJson()
+            val filtered = (0 until eddystones.length())
+                .map { eddystones.getJSONObject(it) }
+                .filter { it.getString("identifier") != identifier }
+
+            val arr = JSONArray()
+            filtered.forEach { arr.put(it) }
+            val newEddystone = JSONObject().apply {
+                put("identifier", identifier)
+                put("namespace", namespace)
+                put("instance", instance)
+            }
+            arr.put(newEddystone)
+            eddystonePrefs.edit().putString(EDDYSTONE_PREFS_KEY, arr.toString()).apply()
+        }
+
+        Function("unpairEddystone") { identifier: String ->
+            val eddystones = loadPairedEddystonesJson()
+            val filtered = (0 until eddystones.length())
+                .map { eddystones.getJSONObject(it) }
+                .filter { it.getString("identifier") != identifier }
+            val arr = JSONArray()
+            filtered.forEach { arr.put(it) }
+            eddystonePrefs.edit().putString(EDDYSTONE_PREFS_KEY, arr.toString()).apply()
+        }
+
+        Function("getPairedEddystones") {
+            val eddystones = loadPairedEddystonesJson()
+            (0 until eddystones.length()).map { i ->
+                val e = eddystones.getJSONObject(i)
+                mapOf(
+                    "identifier" to e.getString("identifier"),
+                    "namespace" to e.getString("namespace"),
+                    "instance" to e.getString("instance")
                 )
             }
         }
@@ -268,6 +349,8 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         OnDestroy {
             this@ExpoBeaconModule.unregisterEventReceiver()
             this@ExpoBeaconModule.scanJob?.cancel()
+            this@ExpoBeaconModule.scanPromise = null
+            this@ExpoBeaconModule.eddystoneScanPromise = null
             this@ExpoBeaconModule.moduleScope.cancel()
             if (this@ExpoBeaconModule.continuousScanActive) {
                 this@ExpoBeaconModule.continuousScanActive = false
@@ -284,7 +367,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     // --- BeaconConsumer (for scan binding) ---
 
     override fun onBeaconServiceConnect() {
-        if (scanPromise != null) startScanRanging()
+        if (scanPromise != null || eddystoneScanPromise != null) startScanRanging()
         if (continuousScanActive) startContinuousRanging()
     }
 
@@ -315,14 +398,18 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
     private val continuousScanRangeNotifier = RangeNotifier { beacons, _ ->
         beacons.forEach { beacon ->
-            sendEvent("onBeaconFound", mapOf(
-                "uuid" to beacon.id1.toString().uppercase(),
-                "major" to beacon.id2.toInt(),
-                "minor" to beacon.id3.toInt(),
-                "rssi" to beacon.rssi,
-                "distance" to beacon.distance,
-                "txPower" to beacon.txPower
-            ))
+            if (beacon.serviceUuid == 0xfeaa) {
+                sendEvent("onEddystoneFound", eddystoneBeaconToMap(beacon))
+            } else {
+                sendEvent("onBeaconFound", mapOf(
+                    "uuid" to beacon.id1.toString().uppercase(),
+                    "major" to beacon.id2.toInt(),
+                    "minor" to beacon.id3.toInt(),
+                    "rssi" to beacon.rssi,
+                    "distance" to beacon.distance,
+                    "txPower" to beacon.txPower
+                ))
+            }
         }
     }
 
@@ -341,7 +428,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         } catch (_: RemoteException) {}
         beaconManager.removeRangeNotifier(scanRangeNotifier)
 
-        val results = scanResults.distinctBy { "${it.id1}:${it.id2}:${it.id3}" }.map { beacon ->
+        val results = scanResults.filter { it.serviceUuid != 0xfeaa }.distinctBy { "${it.id1}:${it.id2}:${it.id3}" }.map { beacon ->
             mapOf(
                 "uuid" to beacon.id1.toString().uppercase(),
                 "major" to beacon.id2.toInt(),
@@ -354,6 +441,74 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         scanPromise?.resolve(results)
         scanPromise = null
         scanUuidFilter = emptySet()
+    }
+
+    private fun stopEddystoneScanAndResolve() {
+        scanJob?.cancel()
+        try {
+            beaconManager.stopRangingBeaconsInRegion(Region("scanRegion", null, null, null))
+        } catch (_: RemoteException) {}
+        beaconManager.removeRangeNotifier(scanRangeNotifier)
+
+        val results = scanResults
+            .filter { it.serviceUuid == 0xfeaa }
+            .distinctBy {
+                if (it.identifiers.size >= 2) "uid:${it.id1}:${it.id2}"
+                else "url:${it.id1}"
+            }
+            .map { eddystoneBeaconToMap(it) }
+
+        eddystoneScanPromise?.resolve(results)
+        eddystoneScanPromise = null
+        scanResults.clear()
+    }
+
+    private fun eddystoneBeaconToMap(beacon: Beacon): Map<String, Any> {
+        val map = mutableMapOf<String, Any>(
+            "rssi" to beacon.rssi,
+            "distance" to beacon.distance,
+            "txPower" to beacon.txPower
+        )
+        if (beacon.identifiers.size >= 2) {
+            map["frameType"] = "uid"
+            map["namespace"] = beacon.id1.toString().removePrefix("0x")
+            map["instance"] = beacon.id2.toString().removePrefix("0x")
+        } else {
+            map["frameType"] = "url"
+            map["url"] = decodeEddystoneUrl(beacon.id1.toByteArray())
+        }
+        return map
+    }
+
+    private fun decodeEddystoneUrl(bytes: ByteArray): String {
+        if (bytes.isEmpty()) return ""
+        val schemes = arrayOf("http://www.", "https://www.", "http://", "https://")
+        val suffixes = mapOf(
+            0x00.toByte() to ".com/", 0x01.toByte() to ".org/",
+            0x02.toByte() to ".edu/", 0x03.toByte() to ".net/",
+            0x04.toByte() to ".info/", 0x05.toByte() to ".biz/",
+            0x06.toByte() to ".gov/",
+            0x07.toByte() to ".com", 0x08.toByte() to ".org",
+            0x09.toByte() to ".edu", 0x0A.toByte() to ".net",
+            0x0B.toByte() to ".info", 0x0C.toByte() to ".biz",
+            0x0D.toByte() to ".gov"
+        )
+        val schemeIndex = bytes[0].toInt() and 0xFF
+        if (schemeIndex >= schemes.size) return ""
+        val sb = StringBuilder(schemes[schemeIndex])
+        for (i in 1 until bytes.size) {
+            val b = bytes[i]
+            val suffix = suffixes[b]
+            if (suffix != null) {
+                sb.append(suffix)
+            } else {
+                val c = b.toInt() and 0xFF
+                if (c in 0x20..0x7E) {
+                    sb.append(c.toChar())
+                }
+            }
+        }
+        return sb.toString()
     }
 
     // --- Notification config helpers ---
@@ -377,6 +532,11 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
     private fun loadPairedBeaconsJson(): JSONArray {
         val json = prefs.getString(PREFS_KEY, "[]") ?: "[]"
+        return try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+    }
+
+    private fun loadPairedEddystonesJson(): JSONArray {
+        val json = eddystonePrefs.getString(EDDYSTONE_PREFS_KEY, "[]") ?: "[]"
         return try { JSONArray(json) } catch (_: Exception) { JSONArray() }
     }
 

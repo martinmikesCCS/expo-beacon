@@ -13,4 +13,9 @@ export type {
   BeaconNotificationConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
+  EddystoneFrameType,
+  EddystoneScanResult,
+  PairedEddystone,
+  EddystoneRegionEvent,
+  EddystoneDistanceEvent,
 } from "./ExpoBeacon.types";

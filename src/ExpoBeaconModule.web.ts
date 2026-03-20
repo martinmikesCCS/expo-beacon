@@ -1,7 +1,9 @@
 import type {
   ExpoBeaconModuleEvents,
   BeaconScanResult,
+  EddystoneScanResult,
   PairedBeacon,
+  PairedEddystone,
 } from "./ExpoBeacon.types";
 
 const notSupported = (): never => {
@@ -13,6 +15,9 @@ const stub = {
     _uuids: string[],
     _scanDuration?: number,
   ): Promise<BeaconScanResult[]> => notSupported(),
+  scanForEddystonesAsync: (
+    _scanDuration?: number,
+  ): Promise<EddystoneScanResult[]> => notSupported(),
   pairBeacon: (
     _identifier: string,
     _uuid: string,
@@ -21,6 +26,13 @@ const stub = {
   ): void => notSupported(),
   unpairBeacon: (_identifier: string): void => notSupported(),
   getPairedBeacons: (): PairedBeacon[] => notSupported(),
+  pairEddystone: (
+    _identifier: string,
+    _namespace: string,
+    _instance: string,
+  ): void => notSupported(),
+  unpairEddystone: (_identifier: string): void => notSupported(),
+  getPairedEddystones: (): PairedEddystone[] => notSupported(),
   startMonitoring: (): Promise<void> => notSupported(),
   stopMonitoring: (): Promise<void> => notSupported(),
   requestPermissionsAsync: (): Promise<boolean> => notSupported(),

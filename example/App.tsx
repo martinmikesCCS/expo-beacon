@@ -16,6 +16,10 @@ import type {
   PairedBeacon,
   BeaconRegionEvent,
   BeaconDistanceEvent,
+  EddystoneScanResult,
+  PairedEddystone,
+  EddystoneRegionEvent,
+  EddystoneDistanceEvent,
 } from "expo-beacon";
 
 interface EventLogEntry {
@@ -30,9 +34,12 @@ export default function App() {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [maxDistance, setMaxDistance] = useState("");
   const [scanResults, setScanResults] = useState<BeaconScanResult[]>([]);
+  const [eddystoneResults, setEddystoneResults] = useState<EddystoneScanResult[]>([]);
   const [pairedBeacons, setPairedBeacons] = useState<PairedBeacon[]>([]);
+  const [pairedEddystones, setPairedEddystones] = useState<PairedEddystone[]>([]);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
+  const eddystoneScanSubRef = useRef<{ remove: () => void } | null>(null);
   const logIdRef = useRef(0);
 
   const addLog = useCallback(
@@ -74,10 +81,32 @@ export default function App() {
       },
     );
 
+    const eddyEnterSub = ExpoBeacon.addListener(
+      "onEddystoneEnter",
+      (event: EddystoneRegionEvent) => {
+        addLog(`EDDY ENTERED: ${event.identifier} (${event.namespace})`, "enter");
+      },
+    );
+    const eddyExitSub = ExpoBeacon.addListener(
+      "onEddystoneExit",
+      (event: EddystoneRegionEvent) => {
+        addLog(`EDDY EXITED: ${event.identifier} (${event.namespace})`, "exit");
+      },
+    );
+    const eddyDistSub = ExpoBeacon.addListener(
+      "onEddystoneDistance",
+      (event: EddystoneDistanceEvent) => {
+        addLog(`EDDY DIST: ${event.identifier} → ${event.distance.toFixed(2)}m`, "info");
+      },
+    );
+
     return () => {
       enterSub.remove();
       exitSub.remove();
       distSub.remove();
+      eddyEnterSub.remove();
+      eddyExitSub.remove();
+      eddyDistSub.remove();
     };
   }, [addLog]);
 
@@ -89,6 +118,8 @@ export default function App() {
   const refreshPairedBeacons = () => {
     const paired = ExpoBeacon.getPairedBeacons();
     setPairedBeacons(paired);
+    const pairedEddy = ExpoBeacon.getPairedEddystones();
+    setPairedEddystones(pairedEddy);
   };
 
   const handleRequestPermissions = async () => {
@@ -102,6 +133,7 @@ export default function App() {
 
   const handleStartLiveScan = () => {
     setScanResults([]);
+    setEddystoneResults([]);
     setIsScanning(true);
     addLog("Live scan started...");
     liveScanSubRef.current = ExpoBeacon.addListener(
@@ -121,6 +153,28 @@ export default function App() {
         });
       },
     );
+    eddystoneScanSubRef.current = ExpoBeacon.addListener(
+      "onEddystoneFound",
+      (beacon: EddystoneScanResult) => {
+        setEddystoneResults((prev) => {
+          const key = beacon.frameType === "uid"
+            ? `${beacon.namespace}-${beacon.instance}`
+            : `url-${beacon.url}`;
+          const idx = prev.findIndex((b) => {
+            const k = b.frameType === "uid"
+              ? `${b.namespace}-${b.instance}`
+              : `url-${b.url}`;
+            return k === key;
+          });
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = beacon;
+            return updated;
+          }
+          return [...prev, beacon];
+        });
+      },
+    );
     ExpoBeacon.startContinuousScan();
   };
 
@@ -128,6 +182,8 @@ export default function App() {
     ExpoBeacon.stopContinuousScan();
     liveScanSubRef.current?.remove();
     liveScanSubRef.current = null;
+    eddystoneScanSubRef.current?.remove();
+    eddystoneScanSubRef.current = null;
     setIsScanning(false);
     addLog("Live scan stopped");
   };
@@ -143,6 +199,20 @@ export default function App() {
     ExpoBeacon.unpairBeacon(identifier);
     refreshPairedBeacons();
     addLog(`Unpaired: ${identifier}`);
+  };
+
+  const handlePairEddystone = (beacon: EddystoneScanResult) => {
+    if (beacon.frameType !== "uid" || !beacon.namespace || !beacon.instance) return;
+    const identifier = `eddy-${beacon.namespace.slice(0, 8)}-${beacon.instance}`;
+    ExpoBeacon.pairEddystone(identifier, beacon.namespace, beacon.instance);
+    refreshPairedBeacons();
+    addLog(`Paired Eddystone: ${identifier}`);
+  };
+
+  const handleUnpairEddystone = (identifier: string) => {
+    ExpoBeacon.unpairEddystone(identifier);
+    refreshPairedBeacons();
+    addLog(`Unpaired Eddystone: ${identifier}`);
   };
 
   const handleStartMonitoring = async () => {
@@ -216,26 +286,80 @@ export default function App() {
           )}
         </Section>
 
+        {/* Eddystone Beacons */}
+        <Section title="Eddystone Beacons">
+          {eddystoneResults.length > 0 && (
+            <View style={styles.list}>
+              {eddystoneResults.map((b, idx) => (
+                <View key={idx} style={styles.card}>
+                  <Text style={styles.cardTitle}>
+                    {b.frameType === "uid" ? "Eddystone-UID" : "Eddystone-URL"}
+                  </Text>
+                  {b.frameType === "uid" ? (
+                    <>
+                      <Text style={styles.cardMeta}>NS: {b.namespace}</Text>
+                      <Text style={styles.cardMeta}>Instance: {b.instance}</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.cardMeta}>URL: {b.url}</Text>
+                  )}
+                  <Text style={styles.cardMeta}>
+                    RSSI: {b.rssi} dBm · ~{b.distance.toFixed(1)}m
+                  </Text>
+                  {b.frameType === "uid" && (
+                    <TouchableOpacity
+                      style={styles.pairBtn}
+                      onPress={() => handlePairEddystone(b)}
+                    >
+                      <Text style={styles.pairBtnText}>Pair this Eddystone</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </View>
+          )}
+          {eddystoneResults.length === 0 && (
+            <Text style={styles.empty}>
+              {isScanning ? "Scanning..." : "No Eddystone beacons found yet"}
+            </Text>
+          )}
+        </Section>
+
         {/* Paired Beacons */}
-        <Section title={`Paired Beacons (${pairedBeacons.length})`}>
-          {pairedBeacons.length === 0 ? (
+        <Section title={`Paired Beacons (${pairedBeacons.length + pairedEddystones.length})`}>
+          {pairedBeacons.length === 0 && pairedEddystones.length === 0 ? (
             <Text style={styles.empty}>No paired beacons</Text>
           ) : (
-            pairedBeacons.map((b) => (
-              <View key={b.identifier} style={styles.card}>
-                <Text style={styles.cardTitle}>{b.identifier}</Text>
-                <Text style={styles.cardMeta}>{b.uuid}</Text>
-                <Text style={styles.cardMeta}>
-                  Major: {b.major} · Minor: {b.minor}
-                </Text>
-                <TouchableOpacity
-                  style={[styles.pairBtn, { backgroundColor: "#c0392b" }]}
-                  onPress={() => handleUnpair(b.identifier)}
-                >
-                  <Text style={styles.pairBtnText}>Unpair</Text>
-                </TouchableOpacity>
-              </View>
-            ))
+            <>
+              {pairedBeacons.map((b) => (
+                <View key={b.identifier} style={styles.card}>
+                  <Text style={styles.cardTitle}>{b.identifier}</Text>
+                  <Text style={styles.cardMeta}>{b.uuid}</Text>
+                  <Text style={styles.cardMeta}>
+                    Major: {b.major} · Minor: {b.minor}
+                  </Text>
+                  <TouchableOpacity
+                    style={[styles.pairBtn, { backgroundColor: "#c0392b" }]}
+                    onPress={() => handleUnpair(b.identifier)}
+                  >
+                    <Text style={styles.pairBtnText}>Unpair</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {pairedEddystones.map((e) => (
+                <View key={e.identifier} style={styles.card}>
+                  <Text style={styles.cardTitle}>{e.identifier}</Text>
+                  <Text style={styles.cardMeta}>NS: {e.namespace}</Text>
+                  <Text style={styles.cardMeta}>Instance: {e.instance}</Text>
+                  <TouchableOpacity
+                    style={[styles.pairBtn, { backgroundColor: "#c0392b" }]}
+                    onPress={() => handleUnpairEddystone(e.identifier)}
+                  >
+                    <Text style={styles.pairBtnText}>Unpair</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </>
           )}
         </Section>
 
@@ -256,7 +380,7 @@ export default function App() {
             <Button
               title="Start Monitoring"
               onPress={handleStartMonitoring}
-              disabled={pairedBeacons.length === 0}
+              disabled={pairedBeacons.length === 0 && pairedEddystones.length === 0}
             />
           ) : (
             <Button

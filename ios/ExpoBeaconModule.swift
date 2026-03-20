@@ -4,6 +4,7 @@ import CoreBluetooth
 import UserNotifications
 
 private let PAIRED_BEACONS_KEY = "expo.beacon.paired"
+private let PAIRED_EDDYSTONES_KEY = "expo.beacon.paired_eddystones"
 private let IS_MONITORING_KEY = "expo.beacon.is_monitoring"
 private let MAX_DISTANCE_KEY = "expo.beacon.max_distance"
 private let NOTIFICATION_CONFIG_KEY = "expo.beacon.notification_config"
@@ -57,13 +58,28 @@ public class ExpoBeaconModule: Module {
     private var wildcardScannedBeacons: [[String: Any]] = []
     private var wildcardScanTimer: DispatchWorkItem?
 
+    // Eddystone (CoreBluetooth) scan state
+    fileprivate var eddystoneScanPromise: Promise?
+    private var eddystoneScannedBeacons: [[String: Any]] = []
+    private var eddystoneScanTimer: DispatchWorkItem?
+
+    // Eddystone monitoring state
+    private var eddystoneMonitoringActive = false
+    private var eddystoneMonitoringTimer: Timer?
+    private var eddystoneLatestSeen: [String: Date] = [:]
+    private var eddystoneEnteredRegions: Set<String> = []
+    private var eddystoneMissCounters: [String: Int] = [:]
+    private var eddystoneEnterCounters: [String: Int] = [:]
+    private var eddystoneExitCounters: [String: Int] = [:]
+    private var eddystoneLastDistanceEmit: [String: Date] = [:]
+
     // Permission callback
     private var permissionCompletion: ((Bool) -> Void)?
 
     public func definition() -> ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance")
 
         // MARK: - Scan
 
@@ -75,21 +91,38 @@ public class ExpoBeaconModule: Module {
 
             self.scanPromise = promise
 
-            // Wildcard scan (empty UUIDs) — use CoreBluetooth raw BLE scanning
-            if uuids.isEmpty {
-                self.startWildcardScan(durationMs: scanDurationMs)
-                return
-            }
-
-            // UUID-targeted scan — use CoreLocation ranging
+            // Build UUID list — iOS cannot do wildcard iBeacon scans via CoreBluetooth
+            // (Apple strips iBeacon data from BLE advertisements). When no UUIDs are
+            // provided, fall back to the unique UUIDs of paired beacons.
             var parsedUUIDs: [UUID] = []
-            for uuidStr in uuids {
-                guard let uuid = UUID(uuidString: uuidStr) else {
-                    promise.reject("INVALID_UUID", "Invalid UUID: \(uuidStr)")
+            if uuids.isEmpty {
+                let paired = self.loadPairedBeaconsRaw()
+                var seen = Set<String>()
+                for b in paired {
+                    guard let uuidStr = b["uuid"] as? String,
+                          let uuid = UUID(uuidString: uuidStr) else { continue }
+                    let key = uuid.uuidString.uppercased()
+                    if !seen.contains(key) {
+                        seen.insert(key)
+                        parsedUUIDs.append(uuid)
+                    }
+                }
+                if parsedUUIDs.isEmpty {
+                    promise.reject("WILDCARD_NOT_SUPPORTED",
+                        "iOS does not support wildcard iBeacon scanning. " +
+                        "Provide at least one proximity UUID, or pair beacons first.")
                     self.scanPromise = nil
                     return
                 }
-                parsedUUIDs.append(uuid)
+            } else {
+                for uuidStr in uuids {
+                    guard let uuid = UUID(uuidString: uuidStr) else {
+                        promise.reject("INVALID_UUID", "Invalid UUID: \(uuidStr)")
+                        self.scanPromise = nil
+                        return
+                    }
+                    parsedUUIDs.append(uuid)
+                }
             }
 
             self.scannedBeacons = []
@@ -147,6 +180,29 @@ public class ExpoBeaconModule: Module {
 
         Function("getPairedBeacons") { () -> [[String: Any]] in
             return self.loadPairedBeaconsRaw()
+        }
+
+        // MARK: - Eddystone Pair
+
+        Function("pairEddystone") { (identifier: String, namespace: String, instance: String) -> Void in
+            var eddystones = self.loadPairedEddystonesRaw()
+            eddystones.removeAll { ($0["identifier"] as? String) == identifier }
+            eddystones.append([
+                "identifier": identifier,
+                "namespace": namespace,
+                "instance": instance
+            ])
+            UserDefaults.standard.set(eddystones, forKey: PAIRED_EDDYSTONES_KEY)
+        }
+
+        Function("unpairEddystone") { (identifier: String) in
+            var eddystones = self.loadPairedEddystonesRaw()
+            eddystones.removeAll { ($0["identifier"] as? String) == identifier }
+            UserDefaults.standard.set(eddystones, forKey: PAIRED_EDDYSTONES_KEY)
+        }
+
+        Function("getPairedEddystones") { () -> [[String: Any]] in
+            return self.loadPairedEddystonesRaw()
         }
 
         // MARK: - Notification Config
@@ -207,7 +263,16 @@ public class ExpoBeaconModule: Module {
         Function("startContinuousScan") { () -> Void in
             guard !self.continuousScanActive else { return }
             self.continuousScanActive = true
-            self.startContinuousScanRanging()
+            // Ranging requires location authorization — request it before starting.
+            self.requestLocationPermission { granted in
+                guard granted, self.continuousScanActive else {
+                    self.continuousScanActive = false
+                    return
+                }
+                self.startContinuousScanRanging()
+                // Also start BLE scanning for Eddystone beacons
+                self.ensureBleScanRunning()
+            }
         }
 
         Function("stopContinuousScan") { () -> Void in
@@ -216,6 +281,19 @@ public class ExpoBeaconModule: Module {
                 self.locationManager.stopRangingBeacons(satisfying: constraint)
             }
             self.continuousScanOnlyConstraints.removeAll()
+            self.stopBleScanIfUnneeded()
+        }
+
+        // MARK: - Eddystone Scan
+
+        AsyncFunction("scanForEddystonesAsync") { (scanDurationMs: Int, promise: Promise) in
+            guard self.eddystoneScanPromise == nil else {
+                promise.reject("SCAN_IN_PROGRESS", "An Eddystone scan is already in progress")
+                return
+            }
+            self.eddystoneScanPromise = promise
+            self.eddystoneScannedBeacons = []
+            self.startEddystoneScan(durationMs: scanDurationMs)
         }
     }
 
@@ -298,6 +376,12 @@ public class ExpoBeaconModule: Module {
             distanceRangingConstraints[identifier] = constraint
             locationManager.startRangingBeacons(satisfying: constraint)
         }
+
+        // Start Eddystone-UID monitoring if any paired Eddystones exist
+        let eddystones = loadPairedEddystonesRaw()
+        if !eddystones.isEmpty {
+            startEddystoneMonitoring()
+        }
     }
 
     private func stopRegionMonitoring() {
@@ -314,28 +398,27 @@ public class ExpoBeaconModule: Module {
         missCounters.removeAll()
         enterCounters.removeAll()
         exitCounters.removeAll()
+
+        stopEddystoneMonitoring()
     }
 
-    // Start ranging for paired beacons not already covered by distance ranging
+    // Start UUID-only ranging for each unique paired-beacon UUID.
+    // UUID-only constraints discover ALL beacons advertising that UUID,
+    // not just the specific major/minor that was paired.
     private func startContinuousScanRanging() {
         let beacons = loadPairedBeaconsRaw()
+        var seenUUIDs = Set<String>()
         for b in beacons {
             guard
-                let identifier = b["identifier"] as? String,
                 let uuidString = b["uuid"] as? String,
-                let uuid = UUID(uuidString: uuidString),
-                let major = b["major"] as? Int,
-                let minor = b["minor"] as? Int
+                let uuid = UUID(uuidString: uuidString)
             else { continue }
 
-            // Reuse the existing distance-ranging stream if monitoring is active
-            if distanceRangingConstraints[identifier] != nil { continue }
+            let key = uuid.uuidString.uppercased()
+            guard !seenUUIDs.contains(key) else { continue }
+            seenUUIDs.insert(key)
 
-            let constraint = CLBeaconIdentityConstraint(
-                uuid: uuid,
-                major: CLBeaconMajorValue(major),
-                minor: CLBeaconMinorValue(minor)
-            )
+            let constraint = CLBeaconIdentityConstraint(uuid: uuid)
             continuousScanOnlyConstraints.append(constraint)
             locationManager.startRangingBeacons(satisfying: constraint)
         }
@@ -433,7 +516,7 @@ public class ExpoBeaconModule: Module {
     private func stopWildcardScanAndResolve() {
         wildcardScanTimer?.cancel()
         wildcardScanTimer = nil
-        centralManager?.stopScan()
+        stopBleScanIfUnneeded()
 
         // Deduplicate by uuid:major:minor, keeping the last (freshest) reading
         var seen = Set<String>()
@@ -450,6 +533,227 @@ public class ExpoBeaconModule: Module {
         wildcardScannedBeacons = []
     }
 
+    // MARK: - Eddystone Scan
+
+    private func startEddystoneScan(durationMs: Int) {
+        ensureBleScanRunning()
+
+        let timer = DispatchWorkItem { [weak self] in
+            self?.stopEddystoneScanAndResolve()
+        }
+        eddystoneScanTimer = timer
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(durationMs), execute: timer)
+    }
+
+    private func stopEddystoneScanAndResolve() {
+        eddystoneScanTimer?.cancel()
+        eddystoneScanTimer = nil
+        stopBleScanIfUnneeded()
+
+        // Deduplicate: by namespace:instance for UID, by url for URL
+        var seen = Set<String>()
+        var deduped: [[String: Any]] = []
+        for beacon in eddystoneScannedBeacons.reversed() {
+            let key: String
+            if let ns = beacon["namespace"] as? String, let inst = beacon["instance"] as? String {
+                key = "uid:\(ns):\(inst)"
+            } else if let url = beacon["url"] as? String {
+                key = "url:\(url)"
+            } else {
+                continue
+            }
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            deduped.append(beacon)
+        }
+
+        eddystoneScanPromise?.resolve(deduped)
+        eddystoneScanPromise = nil
+        eddystoneScannedBeacons = []
+    }
+
+    fileprivate func handleEddystoneDiscovery(advertisementData: [String: Any], rssi: NSNumber) {
+        let eddystoneServiceUUID = CBUUID(string: "FEAA")
+        guard let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
+              let data = serviceData[eddystoneServiceUUID],
+              data.count >= 2 else { return }
+
+        let frameType = data[0]
+        let rssiValue = rssi.intValue
+        var result: [String: Any]?
+
+        switch frameType {
+        case 0x00: // Eddystone-UID
+            guard data.count >= 18 else { return }
+            let txPower = Int(Int8(bitPattern: data[1]))
+            let namespace = data[2..<12].map { String(format: "%02x", $0) }.joined()
+            let instance = data[12..<18].map { String(format: "%02x", $0) }.joined()
+            let distance = Self.calculateDistance(rssi: rssiValue, txPower: txPower)
+            result = [
+                "frameType": "uid",
+                "namespace": namespace,
+                "instance": instance,
+                "rssi": rssiValue,
+                "distance": distance,
+                "txPower": txPower
+            ]
+
+        case 0x10: // Eddystone-URL
+            guard data.count >= 3 else { return }
+            let txPower = Int(Int8(bitPattern: data[1]))
+            let url = Self.decodeEddystoneURL(data: data)
+            let distance = Self.calculateDistance(rssi: rssiValue, txPower: txPower)
+            result = [
+                "frameType": "url",
+                "url": url,
+                "rssi": rssiValue,
+                "distance": distance,
+                "txPower": txPower
+            ]
+
+        default:
+            break
+        }
+
+        guard let beacon = result else { return }
+
+        if eddystoneScanPromise != nil {
+            eddystoneScannedBeacons.append(beacon)
+        }
+
+        if continuousScanActive {
+            sendEvent("onEddystoneFound", beacon)
+        }
+
+        // Eddystone monitoring: match UID frames against paired list
+        if eddystoneMonitoringActive, let ns = beacon["namespace"] as? String,
+           let inst = beacon["instance"] as? String,
+           let distance = beacon["distance"] as? Double {
+            let pairedEddystones = loadPairedEddystonesRaw()
+            for paired in pairedEddystones {
+                guard let identifier = paired["identifier"] as? String,
+                      let pns = paired["namespace"] as? String,
+                      let pinst = paired["instance"] as? String,
+                      pns == ns && pinst == inst else { continue }
+
+                eddystoneLatestSeen[identifier] = Date()
+                eddystoneMissCounters[identifier] = 0
+
+                // Throttle distance events to ~1/sec
+                let now = Date()
+                if let lastEmit = eddystoneLastDistanceEmit[identifier],
+                   now.timeIntervalSince(lastEmit) < 1.0 {
+                    break
+                }
+                eddystoneLastDistanceEmit[identifier] = now
+
+                let distParams: [String: Any] = [
+                    "identifier": identifier,
+                    "namespace": ns,
+                    "instance": inst,
+                    "distance": distance
+                ]
+                sendEvent("onEddystoneDistance", distParams)
+
+                // Distance-driven enter/exit with hysteresis
+                if let maxDist = UserDefaults.standard.object(forKey: MAX_DISTANCE_KEY) as? Double {
+                    if distance <= maxDist {
+                        eddystoneExitCounters[identifier] = 0
+                        eddystoneEnterCounters[identifier] = (eddystoneEnterCounters[identifier] ?? 0) + 1
+
+                        if !eddystoneEnteredRegions.contains(identifier) && (eddystoneEnterCounters[identifier] ?? 0) >= HYSTERESIS_COUNT {
+                            eddystoneEnteredRegions.insert(identifier)
+                            eddystoneEnterCounters[identifier] = 0
+                            let params: [String: Any] = [
+                                "identifier": identifier,
+                                "namespace": ns,
+                                "instance": inst,
+                                "event": "enter",
+                                "distance": distance
+                            ]
+                            sendEvent("onEddystoneEnter", params)
+                            postBeaconNotification(identifier: identifier, eventType: "enter")
+                        }
+                    } else {
+                        eddystoneEnterCounters[identifier] = 0
+                        eddystoneExitCounters[identifier] = (eddystoneExitCounters[identifier] ?? 0) + 1
+
+                        if eddystoneEnteredRegions.contains(identifier) && (eddystoneExitCounters[identifier] ?? 0) >= HYSTERESIS_COUNT {
+                            eddystoneEnteredRegions.remove(identifier)
+                            eddystoneExitCounters[identifier] = 0
+                            let params: [String: Any] = [
+                                "identifier": identifier,
+                                "namespace": ns,
+                                "instance": inst,
+                                "event": "exit",
+                                "distance": distance
+                            ]
+                            sendEvent("onEddystoneExit", params)
+                            postBeaconNotification(identifier: identifier, eventType: "exit")
+                        }
+                    }
+                } else {
+                    // No maxDistance — enter on first consistent readings
+                    eddystoneEnterCounters[identifier] = (eddystoneEnterCounters[identifier] ?? 0) + 1
+
+                    if !eddystoneEnteredRegions.contains(identifier) && (eddystoneEnterCounters[identifier] ?? 0) >= HYSTERESIS_COUNT {
+                        eddystoneEnteredRegions.insert(identifier)
+                        eddystoneEnterCounters[identifier] = 0
+                        let params: [String: Any] = [
+                            "identifier": identifier,
+                            "namespace": ns,
+                            "instance": inst,
+                            "event": "enter",
+                            "distance": distance
+                        ]
+                        sendEvent("onEddystoneEnter", params)
+                        postBeaconNotification(identifier: identifier, eventType: "enter")
+                    }
+                }
+                break
+            }
+        }
+    }
+
+    fileprivate func ensureBleScanRunning() {
+        if centralManager == nil {
+            centralManager = CBCentralManager(delegate: bluetoothDelegate, queue: .main)
+        } else if centralManager?.state == .poweredOn {
+            centralManager?.scanForPeripherals(
+                withServices: nil,
+                options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
+            )
+        }
+    }
+
+    private func stopBleScanIfUnneeded() {
+        guard wildcardScanTimer == nil && eddystoneScanTimer == nil && !continuousScanActive && !eddystoneMonitoringActive else { return }
+        centralManager?.stopScan()
+    }
+
+    private static func decodeEddystoneURL(data: Data) -> String {
+        guard data.count >= 3 else { return "" }
+        let schemes = ["http://www.", "https://www.", "http://", "https://"]
+        let suffixes: [UInt8: String] = [
+            0x00: ".com/", 0x01: ".org/", 0x02: ".edu/", 0x03: ".net/",
+            0x04: ".info/", 0x05: ".biz/", 0x06: ".gov/",
+            0x07: ".com", 0x08: ".org", 0x09: ".edu", 0x0A: ".net",
+            0x0B: ".info", 0x0C: ".biz", 0x0D: ".gov"
+        ]
+        let schemeIndex = Int(data[2])
+        guard schemeIndex < schemes.count else { return "" }
+        var url = schemes[schemeIndex]
+        for i in 3..<data.count {
+            let byte = data[i]
+            if let suffix = suffixes[byte] {
+                url += suffix
+            } else if byte >= 0x20 && byte <= 0x7E {
+                url += String(UnicodeScalar(byte))
+            }
+        }
+        return url
+    }
+
     /// Log-distance path loss model: distance = 10 ^ ((txPower - rssi) / (10 * n)), n = 2.0
     private static func calculateDistance(rssi: Int, txPower: Int) -> Double {
         guard rssi != 0 else { return -1 }
@@ -459,6 +763,75 @@ public class ExpoBeaconModule: Module {
 
     private func loadPairedBeaconsRaw() -> [[String: Any]] {
         return UserDefaults.standard.array(forKey: PAIRED_BEACONS_KEY) as? [[String: Any]] ?? []
+    }
+
+    private func loadPairedEddystonesRaw() -> [[String: Any]] {
+        return UserDefaults.standard.array(forKey: PAIRED_EDDYSTONES_KEY) as? [[String: Any]] ?? []
+    }
+
+    // MARK: - Eddystone Monitoring
+
+    private func startEddystoneMonitoring() {
+        eddystoneMonitoringActive = true
+        ensureBleScanRunning()
+
+        // Timer to detect exit (beacon disappears from BLE advertisements)
+        eddystoneMonitoringTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.eddystoneMonitoringTick()
+        }
+    }
+
+    private func stopEddystoneMonitoring() {
+        eddystoneMonitoringActive = false
+        eddystoneMonitoringTimer?.invalidate()
+        eddystoneMonitoringTimer = nil
+        eddystoneLatestSeen.removeAll()
+        eddystoneEnteredRegions.removeAll()
+        eddystoneMissCounters.removeAll()
+        eddystoneEnterCounters.removeAll()
+        eddystoneExitCounters.removeAll()
+        eddystoneLastDistanceEmit.removeAll()
+        stopBleScanIfUnneeded()
+    }
+
+    private func eddystoneMonitoringTick() {
+        let now = Date()
+        let pairedEddystones = loadPairedEddystonesRaw()
+
+        for paired in pairedEddystones {
+            guard let identifier = paired["identifier"] as? String else { continue }
+
+            if let lastSeen = eddystoneLatestSeen[identifier], now.timeIntervalSince(lastSeen) < 3.0 {
+                // Recently seen — miss counter reset already done in handleEddystoneDiscovery
+                continue
+            }
+
+            // Not seen recently — increment miss counter
+            guard eddystoneEnteredRegions.contains(identifier) else { continue }
+
+            let count = (eddystoneMissCounters[identifier] ?? 0) + 1
+            eddystoneMissCounters[identifier] = count
+
+            if count >= EXIT_MISS_THRESHOLD {
+                eddystoneEnteredRegions.remove(identifier)
+                eddystoneMissCounters[identifier] = 0
+                eddystoneEnterCounters[identifier] = 0
+                eddystoneExitCounters[identifier] = 0
+                eddystoneLatestSeen.removeValue(forKey: identifier)
+
+                let ns = paired["namespace"] as? String ?? ""
+                let inst = paired["instance"] as? String ?? ""
+                let params: [String: Any] = [
+                    "identifier": identifier,
+                    "namespace": ns,
+                    "instance": inst,
+                    "event": "exit",
+                    "distance": -1
+                ]
+                sendEvent("onEddystoneExit", params)
+                postBeaconNotification(identifier: identifier, eventType: "exit")
+            }
+        }
     }
 
     private func postBeaconNotification(identifier: String, eventType: String) {
@@ -588,18 +961,9 @@ public class ExpoBeaconModule: Module {
                     }
                 }
 
-                // Also emit onBeaconFound if continuous scan is active for this beacon
-                if continuousScanActive {
-                    let foundParams: [String: Any] = [
-                        "uuid": beacon.uuid.uuidString.uppercased(),
-                        "major": beacon.major.intValue,
-                        "minor": beacon.minor.intValue,
-                        "rssi": beacon.rssi,
-                        "distance": beacon.accuracy,
-                        "txPower": 0
-                    ]
-                    sendEvent("onBeaconFound", foundParams)
-                }
+                // Note: onBeaconFound for continuous scan is emitted by the
+                // UUID-only constraints in check 3 below, not here, to avoid
+                // duplicate events when both monitoring and continuous scan are active.
             } else {
                 // No valid beacon reading — beacon may have disappeared
                 let count = (missCounters[identifier] ?? 0) + 1
@@ -753,13 +1117,17 @@ private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
-            module?.beginWildcardScanning()
+            module?.ensureBleScanRunning()
         case .unauthorized:
             module?.scanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
             module?.scanPromise = nil
+            module?.eddystoneScanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
+            module?.eddystoneScanPromise = nil
         case .poweredOff:
             module?.scanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
             module?.scanPromise = nil
+            module?.eddystoneScanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
+            module?.eddystoneScanPromise = nil
         default:
             break
         }
@@ -770,6 +1138,7 @@ private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
                          advertisementData: [String: Any],
                          rssi RSSI: NSNumber) {
         module?.handleWildcardDiscovery(advertisementData: advertisementData, rssi: RSSI)
+        module?.handleEddystoneDiscovery(advertisementData: advertisementData, rssi: RSSI)
     }
 }
 

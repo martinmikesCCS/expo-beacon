@@ -16,6 +16,8 @@ import org.json.JSONArray
 
 private const val PREFS_NAME = "expo.beacon.paired"
 private const val PREFS_KEY = "paired_beacons"
+private const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
+private const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
 private const val CHANNEL_ID = "expo_beacon_channel"
 private const val FOREGROUND_NOTIF_ID = 1001
 private const val ENTER_EXIT_NOTIF_BASE_ID = 2000
@@ -84,6 +86,18 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                     BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
                 )
             }
+            // Register Eddystone-UID parser
+            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=00") == true }) {
+                manager.beaconParsers.add(
+                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=00,p:3-3:-41,i:4-13,i:14-19")
+                )
+            }
+            // Register Eddystone-URL parser
+            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=10") == true }) {
+                manager.beaconParsers.add(
+                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=10,p:3-3:-41,i:4-20v")
+                )
+            }
             // Use continuous scanning (not JobScheduler) for foreground service
             // Guard: throws if called after ranging/monitoring has already started
             try { manager.setEnableScheduledScanJobs(false) } catch (_: IllegalStateException) {}
@@ -126,6 +140,11 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         val json = prefs.getString(PREFS_KEY, "[]") ?: "[]"
         val beacons = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
 
+        // Load paired Eddystones
+        val eddystonePrefs: SharedPreferences = getSharedPreferences(EDDYSTONE_PREFS_NAME, Context.MODE_PRIVATE)
+        val eddystoneJson = eddystonePrefs.getString(EDDYSTONE_PREFS_KEY, "[]") ?: "[]"
+        val eddystones = try { JSONArray(eddystoneJson) } catch (_: Exception) { JSONArray() }
+
         // Stop previous regions and distance-log ranging
         distanceLogRegions.forEach {
             try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
@@ -136,6 +155,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         }
         monitoredRegions.clear()
 
+        // iBeacon regions
         for (i in 0 until beacons.length()) {
             val b = beacons.getJSONObject(i)
             val region = Region(
@@ -157,6 +177,34 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 } catch (e: RemoteException) {
                     distanceLogRegions.remove(region)
                     e.printStackTrace()
+                }
+            }
+        }
+
+        // Eddystone-UID regions
+        for (i in 0 until eddystones.length()) {
+            val e = eddystones.getJSONObject(i)
+            val identifier = e.getString("identifier")
+            val namespace = e.getString("namespace")
+            val instance = e.getString("instance")
+            val region = Region(
+                identifier,
+                Identifier.parse("0x$namespace"),
+                Identifier.parse("0x$instance"),
+                null
+            )
+            monitoredRegions.add(region)
+            try {
+                beaconManager.startMonitoringBeaconsInRegion(region)
+            } catch (ex: RemoteException) {
+                ex.printStackTrace()
+            }
+            if (distanceLogRegions.add(region)) {
+                try {
+                    beaconManager.startRangingBeaconsInRegion(region)
+                } catch (ex: RemoteException) {
+                    distanceLogRegions.remove(region)
+                    ex.printStackTrace()
                 }
             }
         }
@@ -284,13 +332,25 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     private fun sendBeaconBroadcast(region: Region, eventType: String, distance: Double) {
+        // Determine if this is an Eddystone region based on identifier format
+        // Eddystone regions have id1 as a hex namespace (not a UUID)
+        val id1Str = region.id1?.toString() ?: ""
+        val isEddystone = id1Str.startsWith("0x")
+
         val intent = Intent(ACTION_BEACON_EVENT).apply {
             putExtra("identifier", region.uniqueId)
-            putExtra("uuid", region.id1?.toString() ?: "")
-            putExtra("major", region.id2?.toInt() ?: 0)
-            putExtra("minor", region.id3?.toInt() ?: 0)
             putExtra("event", eventType)
             putExtra("distance", distance)
+            if (isEddystone) {
+                putExtra("beaconType", "eddystone")
+                putExtra("namespace", id1Str.removePrefix("0x"))
+                putExtra("instance", region.id2?.toString()?.removePrefix("0x") ?: "")
+            } else {
+                putExtra("beaconType", "ibeacon")
+                putExtra("uuid", id1Str)
+                putExtra("major", region.id2?.toInt() ?: 0)
+                putExtra("minor", region.id3?.toInt() ?: 0)
+            }
             setPackage(packageName)
         }
         sendBroadcast(intent)

@@ -3,7 +3,9 @@ import { NativeModule, requireNativeModule } from "expo";
 import {
   ExpoBeaconModuleEvents,
   BeaconScanResult,
+  EddystoneScanResult,
   PairedBeacon,
+  PairedEddystone,
   NotificationConfig,
   MonitoringOptions,
 } from "./ExpoBeacon.types";
@@ -25,6 +27,16 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   ): Promise<BeaconScanResult[]>;
 
   /**
+   * Start a one-shot Eddystone beacon scan using BLE.
+   * Discovers Eddystone-UID and Eddystone-URL frames.
+   *
+   * @param scanDuration Duration in ms (default 5000)
+   */
+  scanForEddystonesAsync(
+    scanDuration?: number,
+  ): Promise<EddystoneScanResult[]>;
+
+  /**
    * Register a beacon for persistent region monitoring.
    */
   pairBeacon(
@@ -43,6 +55,25 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * Return all currently paired beacons.
    */
   getPairedBeacons(): PairedBeacon[];
+
+  /**
+   * Register an Eddystone-UID beacon for persistent monitoring.
+   */
+  pairEddystone(
+    identifier: string,
+    namespace: string,
+    instance: string,
+  ): void;
+
+  /**
+   * Remove a previously paired Eddystone beacon.
+   */
+  unpairEddystone(identifier: string): void;
+
+  /**
+   * Return all currently paired Eddystone beacons.
+   */
+  getPairedEddystones(): PairedEddystone[];
 
   /**
    * Set persistent notification configuration. Settings are saved and applied to all
@@ -78,14 +109,4 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   requestPermissionsAsync(): Promise<boolean>;
 }
 
-try {
-  // eslint-disable-next-line import/no-mutable-exports
-  var module = requireNativeModule<ExpoBeaconModule>("ExpoBeacon");
-} catch {
-  throw new Error(
-    "expo-beacon: native module not found. Make sure you are using a development build " +
-      "(not Expo Go) and have run `npx expo prebuild` followed by a native rebuild.",
-  );
-}
-
-export default module;
+export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");
