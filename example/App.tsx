@@ -33,13 +33,15 @@ export default function App() {
   const [pairedBeacons, setPairedBeacons] = useState<PairedBeacon[]>([]);
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
+  const logIdRef = useRef(0);
 
   const addLog = useCallback(
     (message: string, type: EventLogEntry["type"] = "info") => {
+      const id = String(++logIdRef.current);
       setEventLog((prev) =>
         [
           {
-            id: String(Date.now()),
+            id,
             timestamp: new Date().toLocaleTimeString(),
             message,
             type,
