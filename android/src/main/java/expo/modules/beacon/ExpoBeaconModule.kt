@@ -18,46 +18,35 @@ import org.altbeacon.beacon.*
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
-
-private const val PREFS_NAME = "expo.beacon.paired"
-private const val PREFS_KEY = "paired_beacons"
-private const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
-private const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
-private const val NOTIFICATION_CONFIG_PREFS = "expo.beacon.notification_config"
+import java.util.Collections
 
 class ExpoBeaconModule : Module(), BeaconConsumer {
 
+    companion object {
+        private val SCAN_REGION = Region("scanRegion", null, null, null)
+        private val NAMESPACE_REGEX = Regex("^[0-9a-fA-F]{20}$")
+        private val INSTANCE_REGEX = Regex("^[0-9a-fA-F]{12}$")
+    }
+
     private val beaconManager: BeaconManager by lazy {
-        BeaconManager.getInstanceForApplication(appContext.reactContext!!).also { manager ->
-            // Must be configured before any bind/ranging starts
+        val ctx = appContext.reactContext
+            ?: throw IllegalStateException("React context is not available")
+        BeaconManager.getInstanceForApplication(ctx).also { manager ->
             manager.setEnableScheduledScanJobs(false)
-            // Register iBeacon layout parser
-            if (manager.beaconParsers.none { it.layout?.contains("0215") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
-                )
-            }
-            // Register Eddystone-UID parser
-            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=00") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=00,p:3-3:-41,i:4-13,i:14-19")
-                )
-            }
-            // Register Eddystone-URL parser
-            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=10") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=10,p:3-3:-41,i:4-20v")
-                )
-            }
+            BeaconParsers.ensureRegistered(manager)
         }
     }
 
     private val prefs: SharedPreferences by lazy {
-        appContext.reactContext!!.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val ctx = appContext.reactContext
+            ?: throw IllegalStateException("React context is not available")
+        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     private val eddystonePrefs: SharedPreferences by lazy {
-        appContext.reactContext!!.getSharedPreferences(EDDYSTONE_PREFS_NAME, Context.MODE_PRIVATE)
+        val ctx = appContext.reactContext
+            ?: throw IllegalStateException("React context is not available")
+        ctx.getSharedPreferences(EDDYSTONE_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     // Coroutine scope tied to module lifecycle
@@ -69,14 +58,23 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     // Current one-shot scan state
     private var scanPromise: Promise? = null
     private var eddystoneScanPromise: Promise? = null
+    // Shared between iBeacon and Eddystone scans — mutual exclusion guard in
+    // scanForBeaconsAsync/scanForEddystonesAsync prevents concurrent use.
     private var scanJob: Job? = null
-    private val scanResults = mutableListOf<Beacon>()
+    private val scanResults: MutableList<Beacon> = Collections.synchronizedList(mutableListOf())
+    @Volatile
     private var scanUuidFilter: Set<String> = emptySet()
     private var isBoundForScan = false
 
     // Continuous scan state
-    private var continuousScanActive = false
+    // @Volatile for visibility to onBeaconServiceConnect() (AltBeacon service thread).
+    // All mutations happen on the JS thread — no atomicity concern.
+    @Volatile private var continuousScanActive = false
     private val continuousScanRegion = Region("continuousScanRegion", null, null, null)
+
+    // Cached paired beacon/eddystone data (invalidated on pair/unpair)
+    private var cachedPairedBeacons: JSONArray? = null
+    private var cachedPairedEddystones: JSONArray? = null
 
     override fun definition() = ModuleDefinition {
         Name("ExpoBeacon")
@@ -84,6 +82,10 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance")
 
         AsyncFunction("scanForBeaconsAsync") { uuids: List<String>?, scanDurationMs: Int, promise: Promise ->
+            if (scanDurationMs <= 0) {
+                promise.reject("INVALID_DURATION", "Scan duration must be a positive integer", null)
+                return@AsyncFunction
+            }
             if (scanPromise != null || eddystoneScanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
                 return@AsyncFunction
@@ -108,6 +110,21 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
         }
 
+        Function("cancelScan") {
+            if (scanPromise != null) {
+                cancelActiveScan()
+                scanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled", null)
+                scanPromise = null
+                scanUuidFilter = emptySet()
+            }
+            if (eddystoneScanPromise != null) {
+                cancelActiveScan()
+                eddystoneScanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled", null)
+                eddystoneScanPromise = null
+            }
+            unbindIfIdle()
+        }
+
         Function("startContinuousScan") {
             if (!continuousScanActive) {
                 continuousScanActive = true
@@ -119,7 +136,6 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     startContinuousRanging()
                 }
             }
-            null
         }
 
         Function("stopContinuousScan") {
@@ -129,11 +145,15 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     beaconManager.stopRangingBeaconsInRegion(continuousScanRegion)
                 } catch (_: RemoteException) {}
                 beaconManager.removeRangeNotifier(continuousScanRangeNotifier)
+                unbindIfIdle()
             }
-            null
         }
 
         AsyncFunction("scanForEddystonesAsync") { scanDurationMs: Int, promise: Promise ->
+            if (scanDurationMs <= 0) {
+                promise.reject("INVALID_DURATION", "Scan duration must be a positive integer", null)
+                return@AsyncFunction
+            }
             if (scanPromise != null || eddystoneScanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
                 return@AsyncFunction
@@ -170,32 +190,22 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 throw expo.modules.kotlin.exception.CodedException("INVALID_MINOR", "Minor must be 0\u201365535, got $minor", null)
             }
 
-            val beacons = loadPairedBeaconsJson()
             // Remove duplicate if exists
-            val filtered = (0 until beacons.length())
-                .map { beacons.getJSONObject(it) }
-                .filter { it.getString("identifier") != identifier }
-
-            val arr = JSONArray()
-            filtered.forEach { arr.put(it) }
+            removePairedEntry(prefs, PREFS_KEY, ::loadPairedBeaconsJson, identifier) { cachedPairedBeacons = null }
+            val beacons = loadPairedBeaconsJson()
             val newBeacon = JSONObject().apply {
                 put("identifier", identifier)
                 put("uuid", uuid)
                 put("major", major)
                 put("minor", minor)
             }
-            arr.put(newBeacon)
-            prefs.edit().putString(PREFS_KEY, arr.toString()).apply()
+            beacons.put(newBeacon)
+            prefs.edit().putString(PREFS_KEY, beacons.toString()).apply()
+            cachedPairedBeacons = null
         }
 
         Function("unpairBeacon") { identifier: String ->
-            val beacons = loadPairedBeaconsJson()
-            val filtered = (0 until beacons.length())
-                .map { beacons.getJSONObject(it) }
-                .filter { it.getString("identifier") != identifier }
-            val arr = JSONArray()
-            filtered.forEach { arr.put(it) }
-            prefs.edit().putString(PREFS_KEY, arr.toString()).apply()
+            removePairedEntry(prefs, PREFS_KEY, ::loadPairedBeaconsJson, identifier) { cachedPairedBeacons = null }
         }
 
         Function("getPairedBeacons") {
@@ -212,30 +222,28 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         Function("pairEddystone") { identifier: String, namespace: String, instance: String ->
-            val eddystones = loadPairedEddystonesJson()
-            val filtered = (0 until eddystones.length())
-                .map { eddystones.getJSONObject(it) }
-                .filter { it.getString("identifier") != identifier }
+            if (!namespace.matches(NAMESPACE_REGEX)) {
+                throw expo.modules.kotlin.exception.CodedException("INVALID_NAMESPACE", "Namespace must be 20 hex characters, got: $namespace", null)
+            }
+            if (!instance.matches(INSTANCE_REGEX)) {
+                throw expo.modules.kotlin.exception.CodedException("INVALID_INSTANCE", "Instance must be 12 hex characters, got: $instance", null)
+            }
 
-            val arr = JSONArray()
-            filtered.forEach { arr.put(it) }
+            // Remove duplicate if exists
+            removePairedEntry(eddystonePrefs, EDDYSTONE_PREFS_KEY, ::loadPairedEddystonesJson, identifier) { cachedPairedEddystones = null }
+            val eddystones = loadPairedEddystonesJson()
             val newEddystone = JSONObject().apply {
                 put("identifier", identifier)
                 put("namespace", namespace)
                 put("instance", instance)
             }
-            arr.put(newEddystone)
-            eddystonePrefs.edit().putString(EDDYSTONE_PREFS_KEY, arr.toString()).apply()
+            eddystones.put(newEddystone)
+            eddystonePrefs.edit().putString(EDDYSTONE_PREFS_KEY, eddystones.toString()).apply()
+            cachedPairedEddystones = null
         }
 
         Function("unpairEddystone") { identifier: String ->
-            val eddystones = loadPairedEddystonesJson()
-            val filtered = (0 until eddystones.length())
-                .map { eddystones.getJSONObject(it) }
-                .filter { it.getString("identifier") != identifier }
-            val arr = JSONArray()
-            filtered.forEach { arr.put(it) }
-            eddystonePrefs.edit().putString(EDDYSTONE_PREFS_KEY, arr.toString()).apply()
+            removePairedEntry(eddystonePrefs, EDDYSTONE_PREFS_KEY, ::loadPairedEddystonesJson, identifier) { cachedPairedEddystones = null }
         }
 
         Function("getPairedEddystones") {
@@ -251,7 +259,10 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         AsyncFunction("startMonitoring") { options: Any?, promise: Promise ->
-            val ctx = appContext.reactContext!!
+            val ctx = appContext.reactContext ?: run {
+                promise.reject("NO_CONTEXT", "React context is not available", null)
+                return@AsyncFunction
+            }
             var maxDistance: Double? = null
             when (options) {
                 is Double -> maxDistance = options
@@ -267,9 +278,9 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     }
                 }
             }
-            ctx.getSharedPreferences("expo.beacon.monitoring_options", Context.MODE_PRIVATE)
+            ctx.getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
                 .edit().apply {
-                    if (maxDistance != null) putFloat("max_distance", maxDistance.toFloat())
+                    if (maxDistance != null) putString("max_distance", maxDistance.toString())
                     else remove("max_distance")
                 }.apply()
             // Verify we have the permissions needed for background monitoring
@@ -287,14 +298,17 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         Function("setNotificationConfig") { config: Map<String, Any?> ->
-            val ctx = appContext.reactContext!!
+            val ctx = appContext.reactContext ?: return@Function
             ctx.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
                 .edit().putString("config", mapToJson(config).toString()).apply()
-            null
         }
 
         AsyncFunction("stopMonitoring") { promise: Promise ->
-            BeaconForegroundService.stop(appContext.reactContext!!)
+            val ctx = appContext.reactContext ?: run {
+                promise.reject("NO_CONTEXT", "React context is not available", null)
+                return@AsyncFunction
+            }
+            BeaconForegroundService.stop(ctx)
             unregisterEventReceiver()
             promise.resolve(null)
         }
@@ -303,6 +317,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             // Step 1: request foreground permissions
             val foreground = buildList {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     add(Manifest.permission.BLUETOOTH_SCAN)
                     add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -347,21 +362,35 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         }
 
         OnDestroy {
-            this@ExpoBeaconModule.unregisterEventReceiver()
-            this@ExpoBeaconModule.scanJob?.cancel()
-            this@ExpoBeaconModule.scanPromise = null
-            this@ExpoBeaconModule.eddystoneScanPromise = null
-            this@ExpoBeaconModule.moduleScope.cancel()
-            if (this@ExpoBeaconModule.continuousScanActive) {
-                this@ExpoBeaconModule.continuousScanActive = false
-                try { this@ExpoBeaconModule.beaconManager.stopRangingBeaconsInRegion(this@ExpoBeaconModule.continuousScanRegion) } catch (_: RemoteException) {}
-                this@ExpoBeaconModule.beaconManager.removeRangeNotifier(this@ExpoBeaconModule.continuousScanRangeNotifier)
-            }
-            if (this@ExpoBeaconModule.isBoundForScan) {
-                this@ExpoBeaconModule.beaconManager.unbind(this@ExpoBeaconModule)
-                this@ExpoBeaconModule.isBoundForScan = false
+            with(this@ExpoBeaconModule) {
+                unregisterEventReceiver()
+                scanJob?.cancel()
+                scanPromise = null
+                eddystoneScanPromise = null
+                moduleScope.cancel()
+                if (continuousScanActive) {
+                    continuousScanActive = false
+                    try { beaconManager.stopRangingBeaconsInRegion(continuousScanRegion) } catch (_: RemoteException) {}
+                    beaconManager.removeRangeNotifier(continuousScanRangeNotifier)
+                }
+                if (isBoundForScan) {
+                    beaconManager.unbind(this@ExpoBeaconModule)
+                    isBoundForScan = false
+                }
             }
         }
+    }
+
+    // --- Scan cleanup helper ---
+
+    /** Shared cleanup for cancelling an active scan (iBeacon or Eddystone). */
+    private fun cancelActiveScan() {
+        scanJob?.cancel()
+        try {
+            beaconManager.stopRangingBeaconsInRegion(SCAN_REGION)
+        } catch (_: RemoteException) {}
+        beaconManager.removeRangeNotifier(scanRangeNotifier)
+        synchronized(scanResults) { scanResults.clear() }
     }
 
     // --- BeaconConsumer (for scan binding) ---
@@ -372,35 +401,47 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     }
 
     override fun getApplicationContext(): Context {
-        return appContext.reactContext!!
+        return appContext.reactContext
+            ?: throw IllegalStateException("React context is not available")
     }
 
     private fun startScanRanging() {
         try {
-            beaconManager.startRangingBeaconsInRegion(
-                Region("scanRegion", null, null, null)
-            )
+            beaconManager.startRangingBeaconsInRegion(SCAN_REGION)
         } catch (e: RemoteException) {
             scanPromise?.reject("SCAN_ERROR", e.message, e)
             scanPromise = null
+            eddystoneScanPromise?.reject("SCAN_ERROR", e.message, e)
+            eddystoneScanPromise = null
         }
     }
 
     private val scanRangeNotifier = RangeNotifier { beacons, _ ->
-        if (scanUuidFilter.isEmpty()) {
-            scanResults.addAll(beacons)
-        } else {
-            scanResults.addAll(beacons.filter { beacon ->
-                scanUuidFilter.contains(beacon.id1.toString().lowercase())
-            })
+        // Filter at ingestion: only collect the beacon type matching the active scan.
+        val filtered = when {
+            scanPromise != null -> beacons.filter { !isEddystoneBeacon(it) }
+            eddystoneScanPromise != null -> beacons.filter { isEddystoneBeacon(it) }
+            else -> return@RangeNotifier
         }
+        val toAdd = if (scanUuidFilter.isEmpty()) {
+            filtered
+        } else {
+            filtered.filter { beacon ->
+                scanUuidFilter.contains(beacon.id1.toString().lowercase())
+            }
+        }
+        synchronized(scanResults) { scanResults.addAll(toAdd) }
+    }
+
+    private fun isEddystoneBeacon(beacon: Beacon): Boolean {
+        return beacon.serviceUuid == 0xfeaa
     }
 
     private val continuousScanRangeNotifier = RangeNotifier { beacons, _ ->
         beacons.forEach { beacon ->
-            if (beacon.serviceUuid == 0xfeaa) {
+            if (isEddystoneBeacon(beacon)) {
                 sendEvent("onEddystoneFound", eddystoneBeaconToMap(beacon))
-            } else {
+            } else if (beacon.identifiers.size >= 3) {
                 sendEvent("onBeaconFound", mapOf(
                     "uuid" to beacon.id1.toString().uppercase(),
                     "major" to beacon.id2.toInt(),
@@ -424,46 +465,57 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
     private fun stopScanAndResolve() {
         try {
-            beaconManager.stopRangingBeaconsInRegion(Region("scanRegion", null, null, null))
+            beaconManager.stopRangingBeaconsInRegion(SCAN_REGION)
         } catch (_: RemoteException) {}
         beaconManager.removeRangeNotifier(scanRangeNotifier)
 
-        val results = scanResults.filter { it.serviceUuid != 0xfeaa }.distinctBy { "${it.id1}:${it.id2}:${it.id3}" }.map { beacon ->
-            mapOf(
-                "uuid" to beacon.id1.toString().uppercase(),
-                "major" to beacon.id2.toInt(),
-                "minor" to beacon.id3.toInt(),
-                "rssi" to beacon.rssi,
-                "distance" to beacon.distance,
-                "txPower" to beacon.txPower
-            )
+        val results = synchronized(scanResults) {
+            val mapped = scanResults.distinctBy { "${it.id1}:${it.id2}:${it.id3}" }.map { beacon ->
+                mapOf(
+                    "uuid" to beacon.id1.toString().uppercase(),
+                    "major" to beacon.id2.toInt(),
+                    "minor" to beacon.id3.toInt(),
+                    "rssi" to beacon.rssi,
+                    "distance" to beacon.distance,
+                    "txPower" to beacon.txPower
+                )
+            }
+            scanResults.clear()
+            mapped
         }
         scanPromise?.resolve(results)
         scanPromise = null
         scanUuidFilter = emptySet()
+        unbindIfIdle()
     }
 
     private fun stopEddystoneScanAndResolve() {
         scanJob?.cancel()
         try {
-            beaconManager.stopRangingBeaconsInRegion(Region("scanRegion", null, null, null))
+            beaconManager.stopRangingBeaconsInRegion(SCAN_REGION)
         } catch (_: RemoteException) {}
         beaconManager.removeRangeNotifier(scanRangeNotifier)
 
-        val results = scanResults
-            .filter { it.serviceUuid == 0xfeaa }
-            .distinctBy {
-                if (it.identifiers.size >= 2) "uid:${it.id1}:${it.id2}"
-                else "url:${it.id1}"
-            }
-            .map { eddystoneBeaconToMap(it) }
+        val results = synchronized(scanResults) {
+            val mapped = scanResults
+                .distinctBy {
+                    if (it.identifiers.size >= 2) "uid:${it.id1}:${it.id2}"
+                    else "url:${it.id1}"
+                }
+                .map { eddystoneBeaconToMap(it) }
+            scanResults.clear()
+            mapped
+        }
 
         eddystoneScanPromise?.resolve(results)
         eddystoneScanPromise = null
-        scanResults.clear()
+        unbindIfIdle()
     }
 
     private fun eddystoneBeaconToMap(beacon: Beacon): Map<String, Any> {
+        // AltBeacon provides distance via its built-in path-loss model.
+        // iOS uses a custom calculateDistance() with NaN/Infinity clamping for Eddystone.
+        // Both return -1.0 for invalid readings, but distance estimates may differ slightly.
         val map = mutableMapOf<String, Any>(
             "rssi" to beacon.rssi,
             "distance" to beacon.distance,
@@ -480,9 +532,15 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         return map
     }
 
+    // Decodes an Eddystone-URL payload from AltBeacon's id1 byte array.
+    // AltBeacon strips the frame-type (0x10) and txPower bytes before populating
+    // identifiers, so bytes[0] is the URL scheme index. On iOS (CoreBluetooth raw
+    // service data), data[0]=frameType, data[1]=txPower, data[2]=scheme — see
+    // ExpoBeaconModule.swift decodeEddystoneURL.
     private fun decodeEddystoneUrl(bytes: ByteArray): String {
         if (bytes.isEmpty()) return ""
         val schemes = arrayOf("http://www.", "https://www.", "http://", "https://")
+        // SYNC: This suffix table must match decodeEddystoneURL() in ExpoBeaconModule.swift
         val suffixes = mapOf(
             0x00.toByte() to ".com/", 0x01.toByte() to ".org/",
             0x02.toByte() to ".edu/", 0x03.toByte() to ".net/",
@@ -522,6 +580,19 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     @Suppress("UNCHECKED_CAST")
                     json.put(key, mapToJson(value as Map<String, Any?>))
                 }
+                is List<*> -> {
+                    val arr = JSONArray()
+                    value.forEach { item ->
+                        when (item) {
+                            is Map<*, *> -> {
+                                @Suppress("UNCHECKED_CAST")
+                                arr.put(mapToJson(item as Map<String, Any?>))
+                            }
+                            else -> arr.put(item)
+                        }
+                    }
+                    json.put(key, arr)
+                }
                 else -> json.put(key, value)
             }
         }
@@ -530,14 +601,38 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
     // --- Shared Preferences helpers ---
 
+    /** Removes entries matching [identifier] from a paired JSON array, saves, and invalidates cache. */
+    private fun removePairedEntry(
+        prefs: SharedPreferences,
+        key: String,
+        loader: () -> JSONArray,
+        identifier: String,
+        cacheInvalidator: () -> Unit
+    ) {
+        val items = loader()
+        val filtered = (0 until items.length())
+            .map { items.getJSONObject(it) }
+            .filter { it.getString("identifier") != identifier }
+        val arr = JSONArray()
+        filtered.forEach { arr.put(it) }
+        prefs.edit().putString(key, arr.toString()).apply()
+        cacheInvalidator()
+    }
+
     private fun loadPairedBeaconsJson(): JSONArray {
+        cachedPairedBeacons?.let { return it }
         val json = prefs.getString(PREFS_KEY, "[]") ?: "[]"
-        return try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+        val result = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+        cachedPairedBeacons = result
+        return result
     }
 
     private fun loadPairedEddystonesJson(): JSONArray {
+        cachedPairedEddystones?.let { return it }
         val json = eddystonePrefs.getString(EDDYSTONE_PREFS_KEY, "[]") ?: "[]"
-        return try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+        val result = try { JSONArray(json) } catch (_: Exception) { JSONArray() }
+        cachedPairedEddystones = result
+        return result
     }
 
     // --- Event receiver registration ---
@@ -569,10 +664,19 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     // --- BeaconConsumer binding delegation ---
 
     override fun bindService(intent: Intent, connection: ServiceConnection, mode: Int): Boolean {
-        return appContext.reactContext!!.bindService(intent, connection, mode)
+        val ctx = appContext.reactContext ?: return false
+        return ctx.bindService(intent, connection, mode)
     }
 
     override fun unbindService(connection: ServiceConnection) {
-        appContext.reactContext!!.unbindService(connection)
+        appContext.reactContext?.unbindService(connection)
+    }
+
+    /** Unbind from AltBeacon service when no scan or continuous mode is active. */
+    private fun unbindIfIdle() {
+        if (scanPromise == null && eddystoneScanPromise == null && !continuousScanActive && isBoundForScan) {
+            beaconManager.unbind(this)
+            isBoundForScan = false
+        }
     }
 }

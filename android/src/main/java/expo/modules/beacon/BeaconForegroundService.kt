@@ -9,23 +9,20 @@ import android.os.Build
 import android.os.IBinder
 import android.os.RemoteException
 import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.altbeacon.beacon.*
 import org.json.JSONArray
 
-private const val PREFS_NAME = "expo.beacon.paired"
-private const val PREFS_KEY = "paired_beacons"
-private const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
-private const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
 private const val CHANNEL_ID = "expo_beacon_channel"
 private const val FOREGROUND_NOTIF_ID = 1001
+/**
+ * Base ID for per-beacon enter/exit notifications; incremented per unique region.
+ * With FOREGROUND_NOTIF_ID at 1001, this allows up to 999 unique regions
+ * before ID collision. Sufficient for real-world beacon deployments.
+ */
 private const val ENTER_EXIT_NOTIF_BASE_ID = 2000
-
-/// Number of consecutive ranging misses before emitting a distance-based exit event.
-private const val EXIT_MISS_THRESHOLD = 3
-/// Number of consecutive readings required to confirm a distance-based enter or exit transition.
-private const val HYSTERESIS_COUNT = 3
 
 class BeaconForegroundService : Service(), BeaconConsumer {
 
@@ -44,7 +41,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     private val missCounters = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     // Notification ID counter for unique per-beacon notifications
-    private var notifIdCounter = 0
+    private val notifIdCounter = AtomicInteger(0)
     private val notifIdMap = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     // Distance logging
@@ -80,27 +77,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         super.onCreate()
         createNotificationChannel()
         beaconManager = BeaconManager.getInstanceForApplication(this).also { manager ->
-            // Register iBeacon parser if not already registered
-            if (manager.beaconParsers.none { it.layout?.contains("0215") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("m:2-3=0215,i:4-19,i:20-21,i:22-23,p:24-24,d:25-25")
-                )
-            }
-            // Register Eddystone-UID parser
-            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=00") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=00,p:3-3:-41,i:4-13,i:14-19")
-                )
-            }
-            // Register Eddystone-URL parser
-            if (manager.beaconParsers.none { it.layout?.contains("s:0-1=feaa,m:2-2=10") == true }) {
-                manager.beaconParsers.add(
-                    BeaconParser().setBeaconLayout("s:0-1=feaa,m:2-2=10,p:3-3:-41,i:4-20v")
-                )
-            }
-            // Use continuous scanning (not JobScheduler) for foreground service
-            // Guard: throws if called after ranging/monitoring has already started
-            try { manager.setEnableScheduledScanJobs(false) } catch (_: IllegalStateException) {}
+            BeaconParsers.ensureRegistered(manager)
+            try { manager.setEnableScheduledScanJobs(false) } catch (e: IllegalStateException) { Log.w(TAG, "setEnableScheduledScanJobs failed", e) }
             manager.setBackgroundBetweenScanPeriod(5000L)  // 5s between scans
             manager.setBackgroundScanPeriod(1100L)         // 1.1s scan window
             manager.setForegroundScanPeriod(1000L)         // 1s scan window for distance logging
@@ -124,10 +102,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     override fun onBeaconServiceConnect() {
         // Read max distance from options prefs
-        val optPrefs = getSharedPreferences("expo.beacon.monitoring_options", Context.MODE_PRIVATE)
-        maxDistance = if (optPrefs.contains("max_distance"))
-            optPrefs.getFloat("max_distance", Float.MAX_VALUE).toDouble()
-        else null
+        val optPrefs = getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
+        maxDistance = optPrefs.getString("max_distance", null)?.toDoubleOrNull()
 
         beaconManager.addMonitorNotifier(monitorNotifier)
         beaconManager.addRangeNotifier(rangeNotifier)
@@ -168,7 +144,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             try {
                 beaconManager.startMonitoringBeaconsInRegion(region)
             } catch (e: RemoteException) {
-                e.printStackTrace()
+                Log.e(TAG, "Failed to start monitoring iBeacon region ${region.uniqueId}", e)
             }
             // Start ranging this region for distance logging
             if (distanceLogRegions.add(region)) {
@@ -176,7 +152,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                     beaconManager.startRangingBeaconsInRegion(region)
                 } catch (e: RemoteException) {
                     distanceLogRegions.remove(region)
-                    e.printStackTrace()
+                    Log.e(TAG, "Failed to start ranging iBeacon region ${region.uniqueId}", e)
                 }
             }
         }
@@ -197,81 +173,30 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             try {
                 beaconManager.startMonitoringBeaconsInRegion(region)
             } catch (ex: RemoteException) {
-                ex.printStackTrace()
+                Log.e(TAG, "Failed to start monitoring Eddystone region $identifier", ex)
             }
             if (distanceLogRegions.add(region)) {
                 try {
                     beaconManager.startRangingBeaconsInRegion(region)
                 } catch (ex: RemoteException) {
                     distanceLogRegions.remove(region)
-                    ex.printStackTrace()
+                    Log.e(TAG, "Failed to start ranging Eddystone region $identifier", ex)
                 }
             }
         }
+
+        // If no regions to monitor, stop the service to avoid idling
+        if (monitoredRegions.isEmpty()) {
+            Log.d(TAG, "No paired beacons — stopping idle foreground service")
+            stopSelf()
+        }
     }
 
+    // Distance logging only — emits distance broadcasts. Enter/exit logic lives in rangeNotifier.
     private val distanceLoggingRangeNotifier = RangeNotifier { beacons, region ->
         val closest = beacons.filter { it.distance >= 0 }.minByOrNull { it.distance }
         if (closest != null) {
-            Log.d("BeaconMonitor", "[${region.uniqueId}] distance: ${"%.2f".format(closest.distance)} m  rssi=${closest.rssi}  txPower=${closest.txPower}")
             sendBeaconBroadcast(region, "distance", closest.distance)
-
-            // Reset miss counter — we got a valid reading
-            missCounters[region.uniqueId] = 0
-
-            val maxDist = maxDistance
-            if (maxDist != null) {
-                synchronized(distanceLock) {
-                    if (closest.distance <= maxDist) {
-                        // Reading is inside threshold
-                        exitCounters[region.uniqueId] = 0
-                        val count = (enterCounters[region.uniqueId] ?: 0) + 1
-                        enterCounters[region.uniqueId] = count
-
-                        if (!enteredRegions.contains(region.uniqueId) && count >= HYSTERESIS_COUNT) {
-                            enteredRegions.add(region.uniqueId)
-                            enterCounters[region.uniqueId] = 0
-                            rangingRegions.remove(region)
-                            sendBeaconBroadcast(region, "enter", closest.distance)
-                            showEnterExitNotification(region, "enter")
-                        }
-                    } else {
-                        // Reading is outside threshold
-                        enterCounters[region.uniqueId] = 0
-                        val count = (exitCounters[region.uniqueId] ?: 0) + 1
-                        exitCounters[region.uniqueId] = count
-
-                        if (enteredRegions.contains(region.uniqueId) && count >= HYSTERESIS_COUNT) {
-                            enteredRegions.remove(region.uniqueId)
-                            exitCounters[region.uniqueId] = 0
-                            rangingRegions.add(region)
-                            sendBeaconBroadcast(region, "exit", closest.distance)
-                            showEnterExitNotification(region, "exit")
-                        }
-                    }
-                }
-            }
-        } else {
-            Log.d("BeaconMonitor", "[${region.uniqueId}] no beacons in range")
-
-            // Beacon may have disappeared — track consecutive misses
-            val maxDist = maxDistance
-            if (maxDist != null) {
-                val count = (missCounters[region.uniqueId] ?: 0) + 1
-                missCounters[region.uniqueId] = count
-
-                if (enteredRegions.contains(region.uniqueId) && count >= EXIT_MISS_THRESHOLD) {
-                    synchronized(distanceLock) {
-                        if (enteredRegions.remove(region.uniqueId)) {
-                            missCounters[region.uniqueId] = 0
-                            enterCounters[region.uniqueId] = 0
-                            exitCounters[region.uniqueId] = 0
-                            sendBeaconBroadcast(region, "exit", -1.0)
-                            showEnterExitNotification(region, "exit")
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -292,9 +217,19 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             rangingRegions.remove(region)
 
             if (maxDistance != null) {
-                // When maxDistance is set, distance ranging handles exit events.
-                // Just clean up tracked state so distance-driven exit can fire.
-                enteredRegions.remove(region.uniqueId)
+                // Distance ranging normally handles exit. But if the beacon was
+                // in "entered" state when OS fires didExitRegion, we must emit
+                // the exit event — ranging will no longer receive readings.
+                val wasEntered = enteredRegions.remove(region.uniqueId)
+                synchronized(distanceLock) {
+                    enterCounters.remove(region.uniqueId)
+                    exitCounters.remove(region.uniqueId)
+                    missCounters.remove(region.uniqueId)
+                }
+                if (wasEntered) {
+                    sendBeaconBroadcast(region, "exit", -1.0)
+                    showEnterExitNotification(region, "exit")
+                }
                 return
             }
 
@@ -303,32 +238,94 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             showEnterExitNotification(region, "exit")
         }
 
-        override fun didDetermineStateForRegion(state: Int, region: Region) {}
+        override fun didDetermineStateForRegion(state: Int, region: Region) {
+            // Intentionally empty — enter/exit handled by didEnterRegion/didExitRegion.
+        }
     }
 
+    // Single source of truth for distance-based enter/exit with hysteresis.
+    // Processes regions added to rangingRegions by monitorNotifier.didEnterRegion,
+    // and also handles exit via miss counting when beacons disappear.
     private val rangeNotifier = RangeNotifier { beacons, region ->
         val maxDist = maxDistance ?: return@RangeNotifier
-        if (!rangingRegions.contains(region)) return@RangeNotifier
+        if (!rangingRegions.contains(region) && !enteredRegions.contains(region.uniqueId)) return@RangeNotifier
 
-        // Find the matching beacon (best distance reading)
         val beacon = beacons
             .filter { it.distance >= 0 }
-            .minByOrNull { it.distance } ?: return@RangeNotifier
+            .minByOrNull { it.distance }
 
         synchronized(distanceLock) {
-            if (beacon.distance <= maxDist && !enteredRegions.contains(region.uniqueId)) {
-                val count = (enterCounters[region.uniqueId] ?: 0) + 1
-                enterCounters[region.uniqueId] = count
+            if (beacon != null) {
+                // Got a valid reading — reset miss counter
+                missCounters[region.uniqueId] = 0
 
-                if (count >= HYSTERESIS_COUNT) {
-                    enteredRegions.add(region.uniqueId)
+                val action = evaluateDistanceHysteresis(region.uniqueId, beacon.distance, maxDist)
+                when (action) {
+                    HysteresisAction.ENTER -> {
+                        enteredRegions.add(region.uniqueId)
+                        rangingRegions.remove(region)
+                        sendBeaconBroadcast(region, "enter", beacon.distance)
+                        showEnterExitNotification(region, "enter")
+                    }
+                    HysteresisAction.EXIT -> {
+                        enteredRegions.remove(region.uniqueId)
+                        rangingRegions.add(region)
+                        sendBeaconBroadcast(region, "exit", beacon.distance)
+                        showEnterExitNotification(region, "exit")
+                    }
+                    HysteresisAction.NONE -> {}
+                }
+            } else {
+                // No valid beacon reading — track consecutive misses for exit detection
+                val count = (missCounters[region.uniqueId] ?: 0) + 1
+                missCounters[region.uniqueId] = count
+
+                if (enteredRegions.contains(region.uniqueId) && count >= EXIT_MISS_THRESHOLD) {
+                    enteredRegions.remove(region.uniqueId)
+                    missCounters[region.uniqueId] = 0
                     enterCounters[region.uniqueId] = 0
-                    rangingRegions.remove(region)
-                    sendBeaconBroadcast(region, "enter", beacon.distance)
-                    showEnterExitNotification(region, "enter")
+                    exitCounters[region.uniqueId] = 0
+                    sendBeaconBroadcast(region, "exit", -1.0)
+                    showEnterExitNotification(region, "exit")
                 }
             }
         }
+    }
+
+    // MARK: - Distance-based enter/exit hysteresis
+
+    private enum class HysteresisAction { NONE, ENTER, EXIT }
+
+    /**
+     * Evaluate distance-based enter/exit with hysteresis counters.
+     * Must be called within synchronized(distanceLock).
+     * Mirrors [ExpoBeaconModule.swift evaluateDistanceHysteresis].
+     */
+    private fun evaluateDistanceHysteresis(
+        regionId: String,
+        distance: Double,
+        maxDist: Double
+    ): HysteresisAction {
+        if (distance <= maxDist) {
+            // Inside threshold
+            exitCounters[regionId] = 0
+            val count = (enterCounters[regionId] ?: 0) + 1
+            enterCounters[regionId] = count
+            if (!enteredRegions.contains(regionId) && count >= HYSTERESIS_COUNT) {
+                enterCounters[regionId] = 0
+                return HysteresisAction.ENTER
+            }
+        } else {
+            // Outside threshold
+            enterCounters[regionId] = 0
+            val count = (exitCounters[regionId] ?: 0) + 1
+            exitCounters[regionId] = count
+            if (enteredRegions.contains(regionId) && count >= HYSTERESIS_COUNT) {
+                exitCounters[regionId] = 0
+                return HysteresisAction.EXIT
+            }
+        }
+        return HysteresisAction.NONE
     }
 
     private fun sendBeaconBroadcast(region: Region, eventType: String, distance: Double) {
@@ -353,6 +350,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             }
             setPackage(packageName)
         }
+        // Scoped system broadcast — see BeaconEventReceiver.kt for architecture rationale.
         sendBroadcast(intent)
     }
 
@@ -391,8 +389,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             .build()
 
         try {
-            val notifId = notifIdMap.getOrPut(region.uniqueId) {
-                ENTER_EXIT_NOTIF_BASE_ID + notifIdCounter++
+            val notifId = notifIdMap.computeIfAbsent(region.uniqueId) {
+                ENTER_EXIT_NOTIF_BASE_ID + notifIdCounter.getAndIncrement()
             }
             NotificationManagerCompat.from(this).notify(notifId, notification)
         } catch (_: SecurityException) {
@@ -450,7 +448,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     private fun readNotificationConfig(): org.json.JSONObject {
-        val json = getSharedPreferences("expo.beacon.notification_config", Context.MODE_PRIVATE)
+        val json = getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
             .getString("config", null) ?: return org.json.JSONObject()
         return try { org.json.JSONObject(json) } catch (_: Exception) { org.json.JSONObject() }
     }

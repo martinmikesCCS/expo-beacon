@@ -8,7 +8,12 @@ export type BeaconScanResult = {
   txPower: number; // Calibrated TX power
 };
 
-/** A beacon that has been paired/registered for monitoring. */
+/**
+ * A beacon that has been paired/registered for monitoring.
+ *
+ * Note: Paired beacon data is stored unencrypted in UserDefaults (iOS) /
+ * SharedPreferences (Android) and may be included in device backups.
+ */
 export type PairedBeacon = {
   identifier: string; // User-defined label (e.g. "lobby-door")
   uuid: string;
@@ -116,7 +121,12 @@ export type EddystoneScanResult = {
   txPower: number;
 };
 
-/** An Eddystone-UID beacon that has been paired/registered for monitoring. */
+/**
+ * An Eddystone-UID beacon that has been paired/registered for monitoring.
+ *
+ * Note: Paired beacon data is stored unencrypted in UserDefaults (iOS) /
+ * SharedPreferences (Android) and may be included in device backups.
+ */
 export type PairedEddystone = {
   identifier: string;
   /** 10-byte namespace ID as hex string (20 chars). */

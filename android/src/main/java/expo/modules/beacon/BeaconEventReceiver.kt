@@ -7,6 +7,11 @@ import android.content.Intent
 /**
  * Receives ACTION_BEACON_EVENT broadcasts from BeaconForegroundService
  * and forwards them to the Expo module event system.
+ *
+ * Architecture note: System broadcasts (scoped via setPackage + RECEIVER_NOT_EXPORTED)
+ * are used rather than LocalBroadcastManager or a bound-service callback because the
+ * foreground service must survive JS module destruction (e.g., during hot reload).
+ * System broadcasts decouple the service lifecycle from the module lifecycle.
  */
 class BeaconEventReceiver(
     private val onEvent: (eventName: String, params: Map<String, Any>) -> Unit

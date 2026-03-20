@@ -107,6 +107,12 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /** Stop the continuous scan started by startContinuousScan(). */
   stopContinuousScan(): void;
 
+  /**
+   * Cancel any in-progress one-shot scan (iBeacon or Eddystone).
+   * The pending promise will be rejected with code "SCAN_CANCELLED".
+   */
+  cancelScan(): void;
+
   /** Request Bluetooth + Location permissions. Returns true if granted. */
   requestPermissionsAsync(): Promise<boolean>;
 }
