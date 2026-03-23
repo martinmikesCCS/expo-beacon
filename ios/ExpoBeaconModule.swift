@@ -242,11 +242,10 @@ public class ExpoBeaconModule: Module {
         // MARK: - Eddystone Pair
 
         Function("pairEddystone") { (identifier: String, namespace: String, instance: String) -> Void in
-            let hexPattern = /^[0-9a-fA-F]+$/
-            guard namespace.count == 20, namespace.wholeMatch(of: hexPattern) != nil else {
+            guard namespace.count == 20, namespace.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil else {
                 throw Exception(name: "INVALID_NAMESPACE", description: "Namespace must be 20 hex characters, got: \(namespace)")
             }
-            guard instance.count == 12, instance.wholeMatch(of: hexPattern) != nil else {
+            guard instance.count == 12, instance.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil else {
                 throw Exception(name: "INVALID_INSTANCE", description: "Instance must be 12 hex characters, got: \(instance)")
             }
 
