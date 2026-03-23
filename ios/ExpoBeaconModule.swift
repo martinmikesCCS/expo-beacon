@@ -98,9 +98,11 @@ public class ExpoBeaconModule: Module {
     }()
 
     public func definition() -> ModuleDefinition {
-        migrateUserDefaultsIfNeeded()
-
         Name("ExpoBeacon")
+
+        OnCreate {
+            self.migrateUserDefaultsIfNeeded()
+        }
 
         Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance")
 
