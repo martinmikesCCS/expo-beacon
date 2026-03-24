@@ -251,10 +251,12 @@ public class ExpoBeaconModule: Module {
 
             var eddystones = self.loadPairedEddystonesRaw()
             eddystones.removeAll { ($0["identifier"] as? String) == identifier }
+            // Normalize hex to lowercase — parseEddystoneFrame produces lowercase,
+            // so stored values must match for monitoring comparisons.
             eddystones.append([
                 "identifier": identifier,
-                "namespace": namespace,
-                "instance": instance
+                "namespace": namespace.lowercased(),
+                "instance": instance.lowercased()
             ])
             self.defaults.set(eddystones, forKey: PAIRED_EDDYSTONES_KEY)
             self.cachedPairedEddystones = nil
@@ -307,10 +309,16 @@ public class ExpoBeaconModule: Module {
                 self.defaults.removeObject(forKey: EXIT_DISTANCE_KEY)
             }
             self.defaults.set(true, forKey: IS_MONITORING_KEY)
-            self.requestLocationPermission(requireAlways: true) { granted in
+            self.requestLocationPermission { granted in
                 guard granted else {
-                    promise.reject("PERMISSION_DENIED", "Always location permission required for background monitoring")
+                    promise.reject("PERMISSION_DENIED", "Location permission required for monitoring")
                     return
+                }
+                // Request Always authorization non-blockingly for background support.
+                // On iOS 13+ requestAlwaysAuthorization() from WhenInUse may be a
+                // no-op if the user already made their choice — don't block on it.
+                if self.locationManager.authorizationStatus != .authorizedAlways {
+                    self.locationManager.requestAlwaysAuthorization()
                 }
                 self.requestNotificationPermission()
                 self.startRegionMonitoring()
@@ -662,27 +670,14 @@ public class ExpoBeaconModule: Module {
             guard let identifier = paired["identifier"] as? String,
                   let pns = paired["namespace"] as? String,
                   let pinst = paired["instance"] as? String,
-                  pns == ns && pinst == inst else { continue }
+                  pns.lowercased() == ns && pinst.lowercased() == inst else { continue }
 
             eddystoneLatestSeen[identifier] = Date()
             eddystoneMissCounters[identifier] = 0
 
-            // Throttle distance events
-            let now = Date()
-            if let lastEmit = eddystoneLastDistanceEmit[identifier],
-               now.timeIntervalSince(lastEmit) < DISTANCE_EVENT_THROTTLE_INTERVAL {
-                break
-            }
-            eddystoneLastDistanceEmit[identifier] = now
-
-            sendEvent("onEddystoneDistance", [
-                "identifier": identifier,
-                "namespace": ns,
-                "instance": inst,
-                "distance": distance
-            ])
-
-            // Distance-driven enter/exit with hysteresis
+            // Distance-driven enter/exit with hysteresis — evaluated on every
+            // BLE callback (not throttled) so the hysteresis counters advance
+            // reliably regardless of advertisement rate.
             let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
             let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
             let action = evaluateDistanceHysteresis(
@@ -716,6 +711,22 @@ public class ExpoBeaconModule: Module {
             case .none:
                 break
             }
+
+            // Throttle distance events — enter/exit above is evaluated on every
+            // callback, but distance events are rate-limited to avoid flooding JS.
+            let now = Date()
+            if let lastEmit = eddystoneLastDistanceEmit[identifier],
+               now.timeIntervalSince(lastEmit) < DISTANCE_EVENT_THROTTLE_INTERVAL {
+                break
+            }
+            eddystoneLastDistanceEmit[identifier] = now
+
+            sendEvent("onEddystoneDistance", [
+                "identifier": identifier,
+                "namespace": ns,
+                "instance": inst,
+                "distance": distance
+            ])
             break
         }
     }
@@ -1043,28 +1054,30 @@ public class ExpoBeaconModule: Module {
                 // Emit distance event every ranging cycle (~1 s)
                 sendEvent("onBeaconDistance", makeBeaconEventParams(identifier: identifier, beacon: beacon))
 
-                // Distance-driven enter/exit synthesis with hysteresis
-                if let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double {
-                    let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
-                    let action = evaluateDistanceHysteresis(
-                        identifier: identifier,
-                        distance: beacon.accuracy,
-                        maxDistance: maxDist,
-                        exitDistance: exitDist,
-                        entered: &enteredRegions,
-                        enterCtrs: &enterCounters,
-                        exitCtrs: &exitCounters
-                    )
-                    switch action {
-                    case .enter:
-                        sendEvent("onBeaconEnter", makeBeaconEventParams(identifier: identifier, beacon: beacon, event: "enter"))
-                        postBeaconNotification(identifier: identifier, eventType: "enter")
-                    case .exit:
-                        sendEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, beacon: beacon, event: "exit"))
-                        postBeaconNotification(identifier: identifier, eventType: "exit")
-                    case .none:
-                        break
-                    }
+                // Enter/exit synthesis with hysteresis — always applied.
+                // When maxDistance is set, distance thresholds control transitions.
+                // When maxDistance is nil, pure presence-based hysteresis is used
+                // (HYSTERESIS_COUNT consecutive readings to confirm enter).
+                let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
+                let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
+                let action = evaluateDistanceHysteresis(
+                    identifier: identifier,
+                    distance: beacon.accuracy,
+                    maxDistance: maxDist,
+                    exitDistance: exitDist,
+                    entered: &enteredRegions,
+                    enterCtrs: &enterCounters,
+                    exitCtrs: &exitCounters
+                )
+                switch action {
+                case .enter:
+                    sendEvent("onBeaconEnter", makeBeaconEventParams(identifier: identifier, beacon: beacon, event: "enter"))
+                    postBeaconNotification(identifier: identifier, eventType: "enter")
+                case .exit:
+                    sendEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, beacon: beacon, event: "exit"))
+                    postBeaconNotification(identifier: identifier, eventType: "exit")
+                case .none:
+                    break
                 }
 
                 // Note: onBeaconFound for continuous scan is emitted by the
@@ -1108,38 +1121,27 @@ public class ExpoBeaconModule: Module {
     }
 
     fileprivate func handleDidEnterRegion(_ region: CLRegion) {
-        guard let beaconRegion = region as? CLBeaconRegion else { return }
-        let identifier = beaconRegion.identifier
-
-        // If maxDistance is set, distance ranging handles enter/exit — skip region-based emit
-        guard self.defaults.object(forKey: MAX_DISTANCE_KEY) == nil else { return }
-
-        sendEvent("onBeaconEnter", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "enter"))
-        postBeaconNotification(identifier: identifier, eventType: "enter")
+        // Region callbacks are suppressed — all enter/exit logic goes through
+        // ranging-based hysteresis in handleDidRange for consistent behaviour
+        // with HYSTERESIS_COUNT, regardless of whether maxDistance is set.
     }
 
     fileprivate func handleDidExitRegion(_ region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
         let identifier = beaconRegion.identifier
 
-        // If maxDistance is set, distance ranging normally handles exit.
-        // However, if the beacon was in "entered" state when the OS fires
-        // didExitRegion, we must emit the exit event ourselves — distance
-        // ranging will no longer receive readings for this beacon.
-        if self.defaults.object(forKey: MAX_DISTANCE_KEY) != nil {
-            let wasEntered = enteredRegions.remove(identifier) != nil
-            enterCounters.removeValue(forKey: identifier)
-            exitCounters.removeValue(forKey: identifier)
-            missCounters.removeValue(forKey: identifier)
-            if wasEntered {
-                sendEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "exit"))
-                postBeaconNotification(identifier: identifier, eventType: "exit")
-            }
-            return
+        // Ranging-based hysteresis (handleDidRange miss counter) handles exit
+        // in most cases. However, when the OS fires didExitRegion, ranging may
+        // have already stopped delivering callbacks for this beacon. If the
+        // beacon was in "entered" state, emit the exit event as a safety net.
+        let wasEntered = enteredRegions.remove(identifier) != nil
+        enterCounters.removeValue(forKey: identifier)
+        exitCounters.removeValue(forKey: identifier)
+        missCounters.removeValue(forKey: identifier)
+        if wasEntered {
+            sendEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "exit"))
+            postBeaconNotification(identifier: identifier, eventType: "exit")
         }
-
-        sendEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "exit"))
-        postBeaconNotification(identifier: identifier, eventType: "exit")
     }
 
     fileprivate func handleMonitoringDidFail(for region: CLRegion?, withError error: Error) {
@@ -1213,9 +1215,12 @@ private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
         case .poweredOn:
             module?.ensureBleScanRunning()
         case .unauthorized:
+            print("[ExpoBeacon] Bluetooth authorization denied — Eddystone scanning/monitoring unavailable. " +
+                  "Ensure NSBluetoothAlwaysUsageDescription is set in Info.plist.")
             module?.eddystoneScanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
             module?.eddystoneScanPromise = nil
         case .poweredOff:
+            print("[ExpoBeacon] Bluetooth is powered off — Eddystone scanning/monitoring unavailable.")
             module?.eddystoneScanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
             module?.eddystoneScanPromise = nil
         default:

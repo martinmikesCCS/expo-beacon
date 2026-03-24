@@ -15,10 +15,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "expo.modules.beacon.example",
       "infoPlist": {
-        "UIBackgroundModes": ["location"],
+        "UIBackgroundModes": ["location", "bluetooth-central"],
         "NSLocationAlwaysAndWhenInUseUsageDescription": "This app uses your location in the background to detect nearby beacons.",
         "NSLocationAlwaysUsageDescription": "This app uses your location in the background to detect nearby beacons.",
-        "NSLocationWhenInUseUsageDescription": "This app uses your location to detect nearby beacons."
+        "NSLocationWhenInUseUsageDescription": "This app uses your location to detect nearby beacons.",
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to detect nearby Eddystone beacons."
       }
     },
     "android": {
