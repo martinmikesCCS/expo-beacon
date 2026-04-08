@@ -6,8 +6,11 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.RemoteException
+import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.core.app.NotificationCompat
@@ -32,8 +35,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     // Distance filtering
     @Volatile private var maxDistance: Double? = null
     @Volatile private var exitDistance: Double? = null
-    private val rangingRegions = java.util.concurrent.CopyOnWriteArraySet<Region>()
+    private val monitoredRegionIds = java.util.concurrent.CopyOnWriteArraySet<String>()
     private val enteredRegions = java.util.concurrent.CopyOnWriteArraySet<String>()
+    private val lastSeenAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     // Hysteresis counters (synchronized on distanceLock)
     private val distanceLock = Any()
@@ -47,6 +51,13 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     // Distance logging
     private val distanceLogRegions = java.util.concurrent.CopyOnWriteArraySet<Region>()
+
+    // Timeout timers — fire once after beacon stays in range for configured duration
+    private val timeoutHandler = Handler(Looper.getMainLooper())
+    private val timeoutRunnables = java.util.concurrent.ConcurrentHashMap<String, Runnable>()
+    // Per-beacon timeout seconds lookup (identifier → seconds), loaded from paired data
+    private val beaconTimeouts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private var eventLogger: BeaconEventLogger? = null
 
     companion object {
         private const val PREF_IS_MONITORING = "expo.beacon.is_monitoring"
@@ -80,10 +91,10 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         beaconManager = BeaconManager.getInstanceForApplication(this).also { manager ->
             BeaconParsers.ensureRegistered(manager)
             try { manager.setEnableScheduledScanJobs(false) } catch (e: IllegalStateException) { Log.w(TAG, "setEnableScheduledScanJobs failed", e) }
-            manager.setBackgroundBetweenScanPeriod(5000L)  // 5s between scans
-            manager.setBackgroundScanPeriod(1100L)         // 1.1s scan window
-            manager.setForegroundScanPeriod(1000L)         // 1s scan window for distance logging
-            manager.setForegroundBetweenScanPeriod(0L)     // no pause between scans
+            manager.setBackgroundBetweenScanPeriod(MONITORING_BETWEEN_SCAN_PERIOD_MS)
+            manager.setBackgroundScanPeriod(MONITORING_SCAN_PERIOD_MS)
+            manager.setForegroundScanPeriod(MONITORING_SCAN_PERIOD_MS)
+            manager.setForegroundBetweenScanPeriod(MONITORING_BETWEEN_SCAN_PERIOD_MS)
         }
     }
 
@@ -123,11 +134,40 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         val eddystoneJson = eddystonePrefs.getString(EDDYSTONE_PREFS_KEY, "[]") ?: "[]"
         val eddystones = try { JSONArray(eddystoneJson) } catch (_: Exception) { JSONArray() }
 
+        // Build timeout lookup from paired beacon data
+        beaconTimeouts.clear()
+        for (i in 0 until beacons.length()) {
+            val b = beacons.getJSONObject(i)
+            val id = b.getString("identifier")
+            if (b.has("timeoutSeconds")) {
+                val secs = b.optInt("timeoutSeconds", 0)
+                if (secs > 0) beaconTimeouts[id] = secs
+            }
+        }
+        for (i in 0 until eddystones.length()) {
+            val e = eddystones.getJSONObject(i)
+            val id = e.getString("identifier")
+            if (e.has("timeoutSeconds")) {
+                val secs = e.optInt("timeoutSeconds", 0)
+                if (secs > 0) beaconTimeouts[id] = secs
+            }
+        }
+
         // Stop previous regions and distance-log ranging
         distanceLogRegions.forEach {
             try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
         }
         distanceLogRegions.clear()
+        monitoredRegionIds.clear()
+        enteredRegions.clear()
+        lastSeenAtMs.clear()
+        timeoutHandler.removeCallbacksAndMessages(null)
+        timeoutRunnables.clear()
+        synchronized(distanceLock) {
+            enterCounters.clear()
+            exitCounters.clear()
+            missCounters.clear()
+        }
         monitoredRegions.forEach {
             try { beaconManager.stopMonitoringBeaconsInRegion(it) } catch (_: RemoteException) {}
         }
@@ -143,6 +183,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 Identifier.fromInt(b.getInt("minor"))
             )
             monitoredRegions.add(region)
+            monitoredRegionIds.add(region.uniqueId)
             try {
                 beaconManager.startMonitoringBeaconsInRegion(region)
             } catch (e: RemoteException) {
@@ -172,6 +213,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 null
             )
             monitoredRegions.add(region)
+            monitoredRegionIds.add(region.uniqueId)
             try {
                 beaconManager.startMonitoringBeaconsInRegion(region)
             } catch (ex: RemoteException) {
@@ -196,48 +238,42 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     // Distance logging only — emits distance broadcasts. Enter/exit logic lives in rangeNotifier.
     private val distanceLoggingRangeNotifier = RangeNotifier { beacons, region ->
+        if (!monitoredRegionIds.contains(region.uniqueId)) return@RangeNotifier
         val closest = beacons.filter { it.distance >= 0 }.minByOrNull { it.distance }
         if (closest != null) {
+            lastSeenAtMs[region.uniqueId] = SystemClock.elapsedRealtime()
             sendBeaconBroadcast(region, "distance", closest.distance)
         }
     }
 
     private val monitorNotifier = object : MonitorNotifier {
         override fun didEnterRegion(region: Region) {
-            val maxDist = maxDistance
-            if (maxDist != null) {
-                // Mark region for distance confirmation — ranging is already active via distance logging
-                rangingRegions.add(region)
-            } else {
-                enteredRegions.add(region.uniqueId)
-                sendBeaconBroadcast(region, "enter", -1.0)
-                showEnterExitNotification(region, "enter")
-            }
+            // Enter is synthesized from ranging so distance and enter/exit stay in sync.
         }
 
         override fun didExitRegion(region: Region) {
-            rangingRegions.remove(region)
-
-            if (maxDistance != null) {
-                // Distance ranging normally handles exit. But if the beacon was
-                // in "entered" state when OS fires didExitRegion, we must emit
-                // the exit event — ranging will no longer receive readings.
-                val wasEntered = enteredRegions.remove(region.uniqueId)
-                synchronized(distanceLock) {
-                    enterCounters.remove(region.uniqueId)
-                    exitCounters.remove(region.uniqueId)
-                    missCounters.remove(region.uniqueId)
-                }
-                if (wasEntered) {
-                    sendBeaconBroadcast(region, "exit", -1.0)
-                    showEnterExitNotification(region, "exit")
-                }
+            if (!monitoredRegionIds.contains(region.uniqueId)) return
+            if (wasSeenRecently(region.uniqueId)) {
+                Log.d(TAG, "Ignoring stale didExitRegion for ${region.uniqueId}; beacon was seen by ranging recently")
                 return
             }
 
-            enteredRegions.remove(region.uniqueId)
-            sendBeaconBroadcast(region, "exit", -1.0)
-            showEnterExitNotification(region, "exit")
+            lastSeenAtMs.remove(region.uniqueId)
+
+            // Ranging-based hysteresis handles exit in the normal case. If the OS
+            // fires didExitRegion after ranging has already stopped, emit exit as a
+            // safety net only if the region was previously in the entered state.
+            val wasEntered = enteredRegions.remove(region.uniqueId)
+            synchronized(distanceLock) {
+                enterCounters.remove(region.uniqueId)
+                exitCounters.remove(region.uniqueId)
+                missCounters.remove(region.uniqueId)
+            }
+            if (wasEntered) {
+                cancelTimeout(region.uniqueId)
+                sendBeaconBroadcast(region, "exit", -1.0)
+                showEnterExitNotification(region, "exit")
+            }
         }
 
         override fun didDetermineStateForRegion(state: Int, region: Region) {
@@ -246,11 +282,11 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     // Single source of truth for distance-based enter/exit with hysteresis.
-    // Processes regions added to rangingRegions by monitorNotifier.didEnterRegion,
-    // and also handles exit via miss counting when beacons disappear.
+    // Processes only actual monitoring regions and handles exit via miss counting
+    // when beacons disappear.
     private val rangeNotifier = RangeNotifier { beacons, region ->
-        val maxDist = maxDistance ?: return@RangeNotifier
-        if (!rangingRegions.contains(region) && !enteredRegions.contains(region.uniqueId)) return@RangeNotifier
+        val maxDist = maxDistance
+        if (!monitoredRegionIds.contains(region.uniqueId)) return@RangeNotifier
 
         val beacon = beacons
             .filter { it.distance >= 0 }
@@ -259,19 +295,20 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         synchronized(distanceLock) {
             if (beacon != null) {
                 // Got a valid reading — reset miss counter
+                lastSeenAtMs[region.uniqueId] = SystemClock.elapsedRealtime()
                 missCounters[region.uniqueId] = 0
 
                 val action = evaluateDistanceHysteresis(region.uniqueId, beacon.distance, maxDist)
                 when (action) {
                     HysteresisAction.ENTER -> {
                         enteredRegions.add(region.uniqueId)
-                        rangingRegions.remove(region)
                         sendBeaconBroadcast(region, "enter", beacon.distance)
                         showEnterExitNotification(region, "enter")
+                        scheduleTimeoutIfConfigured(region)
                     }
                     HysteresisAction.EXIT -> {
+                        cancelTimeout(region.uniqueId)
                         enteredRegions.remove(region.uniqueId)
-                        rangingRegions.add(region)
                         sendBeaconBroadcast(region, "exit", beacon.distance)
                         showEnterExitNotification(region, "exit")
                     }
@@ -283,6 +320,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 missCounters[region.uniqueId] = count
 
                 if (enteredRegions.contains(region.uniqueId) && count >= EXIT_MISS_THRESHOLD) {
+                    cancelTimeout(region.uniqueId)
                     enteredRegions.remove(region.uniqueId)
                     missCounters[region.uniqueId] = 0
                     enterCounters[region.uniqueId] = 0
@@ -315,8 +353,23 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     private fun evaluateDistanceHysteresis(
         regionId: String,
         distance: Double,
-        maxDist: Double
+        maxDist: Double?
     ): HysteresisAction {
+        if (maxDist == null) {
+            exitCounters[regionId] = 0
+            if (enteredRegions.contains(regionId)) {
+                enterCounters[regionId] = 0
+                return HysteresisAction.NONE
+            }
+            val count = (enterCounters[regionId] ?: 0) + 1
+            enterCounters[regionId] = count
+            if (count >= HYSTERESIS_COUNT) {
+                enterCounters[regionId] = 0
+                return HysteresisAction.ENTER
+            }
+            return HysteresisAction.NONE
+        }
+
         val exitDist = effectiveExitDistance(maxDist)
         if (distance <= maxDist) {
             // Inside enter threshold
@@ -344,11 +397,57 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         return HysteresisAction.NONE
     }
 
+    private fun wasSeenRecently(regionId: String): Boolean {
+        val lastSeen = lastSeenAtMs[regionId] ?: return false
+        return SystemClock.elapsedRealtime() - lastSeen <= RECENT_RANGING_SIGHTING_GRACE_MS
+    }
+
+    // MARK: - Timeout timer helpers
+
+    private fun scheduleTimeoutIfConfigured(region: Region) {
+        val seconds = beaconTimeouts[region.uniqueId] ?: return
+        // Cancel any existing timer (shouldn't happen, but be safe)
+        cancelTimeout(region.uniqueId)
+        val runnable = Runnable {
+            timeoutRunnables.remove(region.uniqueId)
+            // Only fire if the beacon is still in range
+            if (enteredRegions.contains(region.uniqueId)) {
+                sendBeaconBroadcast(region, "timeout", -1.0)
+            }
+        }
+        timeoutRunnables[region.uniqueId] = runnable
+        timeoutHandler.postDelayed(runnable, seconds * 1000L)
+    }
+
+    private fun cancelTimeout(regionId: String) {
+        timeoutRunnables.remove(regionId)?.let { timeoutHandler.removeCallbacks(it) }
+    }
+
     private fun sendBeaconBroadcast(region: Region, eventType: String, distance: Double) {
         // Determine if this is an Eddystone region based on identifier format
         // Eddystone regions have id1 as a hex namespace (not a UUID)
         val id1Str = region.id1?.toString() ?: ""
         val isEddystone = id1Str.startsWith("0x")
+
+        val params = if (isEddystone) {
+            buildMap<String, Any?> {
+                put("identifier", region.uniqueId)
+                put("namespace", id1Str.removePrefix("0x"))
+                put("instance", region.id2?.toString()?.removePrefix("0x") ?: "")
+                put("event", eventType)
+                put("distance", distance)
+            }
+        } else {
+            buildMap<String, Any?> {
+                put("identifier", region.uniqueId)
+                put("uuid", id1Str)
+                put("major", region.id2?.toInt() ?: 0)
+                put("minor", region.id3?.toInt() ?: 0)
+                put("event", eventType)
+                put("distance", distance)
+            }
+        }
+        monitoringEventName(isEddystone, eventType)?.let { logBeaconEvent(it, params) }
 
         val intent = Intent(ACTION_BEACON_EVENT).apply {
             putExtra("identifier", region.uniqueId)
@@ -368,6 +467,36 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         }
         // Scoped system broadcast — see BeaconEventReceiver.kt for architecture rationale.
         sendBroadcast(intent)
+    }
+
+    private fun monitoringEventName(isEddystone: Boolean, eventType: String): String? {
+        return when (eventType) {
+            "enter" -> if (isEddystone) "onEddystoneEnter" else "onBeaconEnter"
+            "exit" -> if (isEddystone) "onEddystoneExit" else "onBeaconExit"
+            "distance" -> if (isEddystone) "onEddystoneDistance" else "onBeaconDistance"
+            "timeout" -> if (isEddystone) "onEddystoneTimeout" else "onBeaconTimeout"
+            else -> null
+        }
+    }
+
+    @Synchronized
+    private fun getOrCreateEventLogger(): BeaconEventLogger {
+        return eventLogger ?: BeaconEventLogger(applicationContext).also { eventLogger = it }
+    }
+
+    @Synchronized
+    private fun releaseEventLogger() {
+        eventLogger?.close()
+        eventLogger = null
+    }
+
+    private fun logBeaconEvent(eventType: String, params: Map<String, Any?>) {
+        if (!BeaconEventLogger.isLoggingEnabled(this)) {
+            releaseEventLogger()
+            return
+        }
+        val identifier = params["identifier"] as? String
+        getOrCreateEventLogger().logEvent(eventType, identifier, params)
     }
 
     private fun showEnterExitNotification(region: Region, eventType: String) {
@@ -470,13 +599,15 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     override fun onDestroy() {
+        timeoutHandler.removeCallbacksAndMessages(null)
+        timeoutRunnables.clear()
+        beaconTimeouts.clear()
+        lastSeenAtMs.clear()
+        monitoredRegionIds.clear()
+        releaseEventLogger()
         beaconManager.removeMonitorNotifier(monitorNotifier)
         beaconManager.removeRangeNotifier(rangeNotifier)
         beaconManager.removeRangeNotifier(distanceLoggingRangeNotifier)
-        rangingRegions.forEach {
-            try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
-        }
-        rangingRegions.clear()
         distanceLogRegions.forEach {
             try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
         }

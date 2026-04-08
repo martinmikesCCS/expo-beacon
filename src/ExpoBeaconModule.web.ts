@@ -4,6 +4,8 @@ import type {
   EddystoneScanResult,
   PairedBeacon,
   PairedEddystone,
+  EventLogQueryOptions,
+  EventLogEntry,
 } from "./ExpoBeacon.types";
 
 const notSupported = (): never => {
@@ -40,6 +42,11 @@ const stub = {
   cancelScan: (): void => notSupported(),
   setNotificationConfig: (_config: Record<string, unknown>): void => notSupported(),
   requestPermissionsAsync: (): Promise<boolean> => notSupported(),
+  enableEventLogging: (): void => notSupported(),
+  disableEventLogging: (): void => notSupported(),
+  getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] => notSupported(),
+  clearEventLogs: (): void => notSupported(),
+  destroyEventLogs: (): void => notSupported(),
   addListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => ({
     remove: () => {},
   }),

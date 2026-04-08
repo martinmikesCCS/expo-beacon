@@ -41,6 +41,7 @@ class BeaconEventReceiver(
                 "enter" -> "onEddystoneEnter"
                 "exit" -> "onEddystoneExit"
                 "distance" -> "onEddystoneDistance"
+                "timeout" -> "onEddystoneTimeout"
                 else -> return
             }
             onEvent(eventName, params)
@@ -62,6 +63,7 @@ class BeaconEventReceiver(
                 "enter" -> "onBeaconEnter"
                 "exit" -> "onBeaconExit"
                 "distance" -> "onBeaconDistance"
+                "timeout" -> "onBeaconTimeout"
                 else -> return
             }
             onEvent(eventName, params)

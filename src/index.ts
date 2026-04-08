@@ -7,6 +7,7 @@ export type {
   PairedBeacon,
   BeaconRegionEvent,
   BeaconDistanceEvent,
+  BeaconTimeoutEvent,
   ExpoBeaconModuleEvents,
   NotificationConfig,
   MonitoringOptions,
@@ -18,4 +19,7 @@ export type {
   PairedEddystone,
   EddystoneRegionEvent,
   EddystoneDistanceEvent,
+  EddystoneTimeoutEvent,
+  EventLogQueryOptions,
+  EventLogEntry,
 } from "./ExpoBeacon.types";

@@ -8,6 +8,8 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
 | **Pair** | Register specific beacons for persistent tracking — survives app restarts |
 | **Monitor** | Background enter/exit region detection with distance-based filtering |
 | **Distance** | Real-time distance updates (~1/sec) while monitoring |
+| **Timeout** | Fire a one-shot event after a beacon stays in range for a configured duration |
+| **Event Logging** | Persist every beacon event to a local SQLite database for diagnostics & replay |
 | **Notifications** | Automatic local notifications on region enter/exit, fully customisable |
 
 | Platform | Native Implementation |
@@ -32,6 +34,8 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [Pairing & Unpairing Beacons](#pairing--unpairing-beacons)
   - [Background Monitoring](#background-monitoring)
   - [Customizing Notifications](#customizing-notifications)
+  - [Beacon Timeout](#beacon-timeout)
+  - [Event Logging](#event-logging)
   - [Cancelling a Scan](#cancelling-a-scan)
 - [Full API Reference](#full-api-reference)
   - [requestPermissionsAsync()](#requestpermissionsasync)
@@ -49,6 +53,11 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [startMonitoring()](#startmonitoringoptions)
   - [stopMonitoring()](#stopmonitoring)
   - [setNotificationConfig()](#setnotificationconfigconfig)
+  - [enableEventLogging()](#enableeventlogging)
+  - [disableEventLogging()](#disableeventlogging)
+  - [getEventLogs()](#geteventlogsoptions)
+  - [clearEventLogs()](#cleareventlogs)
+  - [destroyEventLogs()](#destroyeventlogs)
 - [Events](#events)
 - [TypeScript Types](#typescript-types)
 - [Background Behaviour](#background-behaviour)
@@ -551,6 +560,103 @@ await ExpoBeacon.startMonitoring({
 
 ---
 
+### Beacon Timeout
+
+Pair a beacon with `timeoutSeconds` to fire a one-shot event after the beacon has been continuously in range for that duration. The timer resets if the beacon exits and re-enters range.
+
+```tsx
+import { useEffect } from "react";
+import ExpoBeacon from "expo-beacon";
+import type { BeaconTimeoutEvent, EddystoneTimeoutEvent } from "expo-beacon";
+
+// Pair with a 30-second timeout
+ExpoBeacon.pairBeacon(
+  "lobby-entrance",
+  "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0",
+  1,
+  100,
+  undefined,      // name (optional)
+  30,             // timeoutSeconds — fires after 30 s in range
+);
+
+// Pair Eddystone with a 60-second timeout
+ExpoBeacon.pairEddystone(
+  "meeting-room",
+  "edd1ebeac04e5defa017",
+  "0123456789ab",
+  undefined,      // name (optional)
+  60,             // timeoutSeconds — fires after 60 s in range
+);
+
+// Listen for the timeout events
+useEffect(() => {
+  const beaconTimeout = ExpoBeacon.addListener(
+    "onBeaconTimeout",
+    (e: BeaconTimeoutEvent) => {
+      console.log(`Beacon "${e.identifier}" in range for configured duration! dist: ${e.distance.toFixed(1)}m`);
+    },
+  );
+  const eddystoneTimeout = ExpoBeacon.addListener(
+    "onEddystoneTimeout",
+    (e: EddystoneTimeoutEvent) => {
+      console.log(`Eddystone "${e.identifier}" in range for configured duration!`);
+    },
+  );
+
+  return () => {
+    beaconTimeout.remove();
+    eddystoneTimeout.remove();
+  };
+}, []);
+```
+
+> **Note**: The timeout fires once per enter cycle. If the beacon exits and re-enters range, the timer starts over.
+
+---
+
+### Event Logging
+
+Enable SQLite-backed event logging to persist every beacon event locally. Useful for diagnostics, debugging, and replaying event history.
+
+```ts
+import ExpoBeacon from "expo-beacon";
+import type { EventLogEntry, EventLogQueryOptions } from "expo-beacon";
+
+// Enable logging — creates/opens the SQLite database
+ExpoBeacon.enableEventLogging();
+
+// ... scanning, monitoring, etc. — all events are now persisted automatically ...
+
+// Query all recent events
+const logs: EventLogEntry[] = ExpoBeacon.getEventLogs();
+console.log(logs);
+// [
+//   { id: 42, timestamp: 1712345678000, eventType: "onBeaconEnter",
+//     identifier: "lobby", data: { uuid: "E2C5…", major: 1, minor: 100, ... } },
+//   ...
+// ]
+
+// Filter by event type and time range
+const enterLogs = ExpoBeacon.getEventLogs({
+  eventType: "onBeaconEnter",
+  sinceTimestamp: Date.now() - 3600_000, // last hour
+  limit: 100,
+});
+
+// Disable logging (retains existing data)
+ExpoBeacon.disableEventLogging();
+
+// Clear all logged events (keeps the database)
+ExpoBeacon.clearEventLogs();
+
+// Destroy the database entirely (also disables logging)
+ExpoBeacon.destroyEventLogs();
+```
+
+> **Storage**: Events are stored in a local SQLite database (`expo_beacon_events.db`). No external dependencies are required — Android uses the built-in SQLite, iOS uses the system `libsqlite3`.
+
+---
+
 ### Cancelling a Scan
 
 Cancel any in-progress one-shot scan (iBeacon or Eddystone). The pending promise will reject with error code `SCAN_CANCELLED`.
@@ -708,10 +814,10 @@ Cancels any in-progress one-shot scan (iBeacon or Eddystone). The pending promis
 
 ---
 
-### `pairBeacon(identifier, uuid, major, minor)`
+### `pairBeacon(identifier, uuid, major, minor, name?, timeoutSeconds?)`
 
 ```ts
-pairBeacon(identifier: string, uuid: string, major: number, minor: number): void
+pairBeacon(identifier: string, uuid: string, major: number, minor: number, name?: string, timeoutSeconds?: number): void
 ```
 
 Registers an iBeacon for persistent monitoring.
@@ -722,11 +828,16 @@ Registers an iBeacon for persistent monitoring.
 | `uuid` | `string` | iBeacon proximity UUID (case-insensitive, e.g. `"E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"`) |
 | `major` | `number` | Major value: `0`–`65535` |
 | `minor` | `number` | Minor value: `0`–`65535` |
+| `name` | `string?` | Optional BLE device name for display purposes |
+| `timeoutSeconds` | `number?` | Fire `onBeaconTimeout` once after the beacon stays in range this many seconds. Timer resets on exit/re-enter. |
 
 **Possible errors**: `INVALID_UUID`, `INVALID_MAJOR`, `INVALID_MINOR`.
 
 ```ts
 ExpoBeacon.pairBeacon("main-door", "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0", 1, 42);
+
+// With timeout — fires onBeaconTimeout after 30 s in range
+ExpoBeacon.pairBeacon("main-door", "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0", 1, 42, undefined, 30);
 ```
 
 ---
@@ -764,10 +875,10 @@ const paired = ExpoBeacon.getPairedBeacons();
 
 ---
 
-### `pairEddystone(identifier, namespace, instance)`
+### `pairEddystone(identifier, namespace, instance, name?, timeoutSeconds?)`
 
 ```ts
-pairEddystone(identifier: string, namespace: string, instance: string): void
+pairEddystone(identifier: string, namespace: string, instance: string, name?: string, timeoutSeconds?: number): void
 ```
 
 Registers an Eddystone-UID beacon for persistent monitoring.
@@ -777,11 +888,16 @@ Registers an Eddystone-UID beacon for persistent monitoring.
 | `identifier` | `string` | Unique label (e.g. `"meeting-room"`) |
 | `namespace` | `string` | 10-byte namespace ID as hex string — must be exactly **20 hex characters** |
 | `instance` | `string` | 6-byte instance ID as hex string — must be exactly **12 hex characters** |
+| `name` | `string?` | Optional BLE device name for display purposes |
+| `timeoutSeconds` | `number?` | Fire `onEddystoneTimeout` once after the beacon stays in range this many seconds. Timer resets on exit/re-enter. |
 
 **Possible errors**: `INVALID_NAMESPACE`, `INVALID_INSTANCE`.
 
 ```ts
 ExpoBeacon.pairEddystone("meeting-room", "edd1ebeac04e5defa017", "0123456789ab");
+
+// With timeout — fires onEddystoneTimeout after 60 s in range
+ExpoBeacon.pairEddystone("meeting-room", "edd1ebeac04e5defa017", "0123456789ab", undefined, 60);
 ```
 
 ---
@@ -897,27 +1013,82 @@ For one-off overrides, pass `notifications` inside `startMonitoring(options)` in
 
 See [`NotificationConfig`](#notificationconfig) for the full shape.
 
+---
+
+### `enableEventLogging()`
+
 ```ts
-ExpoBeacon.setNotificationConfig({
-  beaconEvents: {
-    enabled: true,
-    enterTitle: "Nearby",
-    exitTitle: "Gone",
-    body: "{identifier} {event}ed",
-    sound: true,
-    icon: "ic_notification",
-  },
-  foregroundService: {
-    title: "Monitoring Active",
-    text: "Scanning for beacons",
-    icon: "ic_service",
-  },
-  channel: {
-    name: "Beacons",
-    description: "Beacon proximity alerts",
-    importance: "default",
-  },
-});
+enableEventLogging(): void
+```
+
+Creates/opens the local SQLite database and starts persisting **every beacon event** (`onBeaconEnter`, `onBeaconExit`, `onBeaconDistance`, `onBeaconTimeout`, `onBeaconFound`, `onEddystoneEnter`, etc.). Call before `startMonitoring()` or `startContinuousScan()`.
+
+```ts
+ExpoBeacon.enableEventLogging();
+```
+
+---
+
+### `disableEventLogging()`
+
+```ts
+disableEventLogging(): void
+```
+
+Stops persisting events. Previously logged data is **retained** — call `clearEventLogs()` or `destroyEventLogs()` to remove it.
+
+```ts
+ExpoBeacon.disableEventLogging();
+```
+
+---
+
+### `getEventLogs(options?)`
+
+```ts
+getEventLogs(options?: EventLogQueryOptions): EventLogEntry[]
+```
+
+Retrieves logged events from the SQLite database, newest first.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `limit` | `number` | `1000` | Max rows to return (capped at 10 000) |
+| `eventType` | `string` | `undefined` | Filter by event name (e.g. `"onBeaconEnter"`) |
+| `sinceTimestamp` | `number` | `undefined` | Only events with `timestamp >= value` (ms since epoch) |
+
+**Returns**: `EventLogEntry[]`
+
+```ts
+const logs = ExpoBeacon.getEventLogs({ eventType: "onBeaconEnter", limit: 50 });
+```
+
+---
+
+### `clearEventLogs()`
+
+```ts
+clearEventLogs(): void
+```
+
+Deletes all rows from the event log table. The database file remains.
+
+```ts
+ExpoBeacon.clearEventLogs();
+```
+
+---
+
+### `destroyEventLogs()`
+
+```ts
+destroyEventLogs(): void
+```
+
+Disables logging **and** deletes the entire SQLite database file.
+
+```ts
+ExpoBeacon.destroyEventLogs();
 ```
 
 ---
@@ -944,6 +1115,8 @@ sub.remove();
 | `onEddystoneEnter` | Paired Eddystone enters range (respects `maxDistance`) | `EddystoneRegionEvent` |
 | `onEddystoneExit` | Paired Eddystone leaves range (always fires) | `EddystoneRegionEvent` |
 | `onEddystoneDistance` | Periodic Eddystone distance update during monitoring | `EddystoneDistanceEvent` |
+| `onBeaconTimeout` | Paired iBeacon in range for configured `timeoutSeconds` | `BeaconTimeoutEvent` |
+| `onEddystoneTimeout` | Paired Eddystone in range for configured `timeoutSeconds` | `EddystoneTimeoutEvent` |
 
 ### Event Detail
 
@@ -1038,6 +1211,31 @@ ExpoBeacon.addListener("onEddystoneDistance", (e) => {
 });
 ```
 
+#### `onBeaconTimeout`
+
+Fired **once** when a paired iBeacon has been continuously in range for its configured `timeoutSeconds` duration. The timer resets on exit/re-enter.
+
+```ts
+ExpoBeacon.addListener("onBeaconTimeout", (e) => {
+  // e.identifier — "lobby-entrance"
+  // e.uuid, e.major, e.minor — beacon identity
+  // e.distance — metres at the moment the timeout fired
+  console.log(`Beacon "${e.identifier}" timeout — in range for configured duration`);
+});
+```
+
+#### `onEddystoneTimeout`
+
+Fired **once** when a paired Eddystone has been continuously in range for its configured `timeoutSeconds` duration.
+
+```ts
+ExpoBeacon.addListener("onEddystoneTimeout", (e) => {
+  // e.identifier, e.namespace, e.instance — Eddystone identity
+  // e.distance — metres at the moment the timeout fired (–1 if unavailable)
+  console.log(`Eddystone "${e.identifier}" timeout`);
+});
+```
+
 ---
 
 ## TypeScript Types
@@ -1050,17 +1248,21 @@ import type {
   PairedBeacon,
   BeaconRegionEvent,
   BeaconDistanceEvent,
+  BeaconTimeoutEvent,
   EddystoneFrameType,
   EddystoneScanResult,
   PairedEddystone,
   EddystoneRegionEvent,
   EddystoneDistanceEvent,
+  EddystoneTimeoutEvent,
   ExpoBeaconModuleEvents,
   MonitoringOptions,
   NotificationConfig,
   BeaconNotificationConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
+  EventLogQueryOptions,
+  EventLogEntry,
 } from "expo-beacon";
 ```
 
@@ -1089,6 +1291,8 @@ type PairedBeacon = {
   uuid: string;
   major: number;
   minor: number;
+  name?: string;           // Optional BLE device name
+  timeoutSeconds?: number; // Fires onBeaconTimeout after this duration in range
 };
 ```
 
@@ -1146,6 +1350,8 @@ type PairedEddystone = {
   identifier: string;
   namespace: string;   // 20 hex chars
   instance: string;    // 12 hex chars
+  name?: string;           // Optional BLE device name
+  timeoutSeconds?: number; // Fires onEddystoneTimeout after this duration in range
 };
 ```
 
@@ -1231,6 +1437,59 @@ type NotificationChannelConfig = {
   name?: string;                           // Default: "Beacon Monitoring"
   description?: string;                    // Default: "Used for background iBeacon region monitoring"
   importance?: "low" | "default" | "high"; // Default: "low"
+};
+```
+
+### `BeaconTimeoutEvent`
+
+Payload for `onBeaconTimeout`.
+
+```ts
+type BeaconTimeoutEvent = {
+  identifier: string;
+  uuid: string;
+  major: number;
+  minor: number;
+  distance: number; // Metres at timeout fire (–1 if unavailable)
+};
+```
+
+### `EddystoneTimeoutEvent`
+
+Payload for `onEddystoneTimeout`.
+
+```ts
+type EddystoneTimeoutEvent = {
+  identifier: string;
+  namespace: string;
+  instance: string;
+  distance: number; // Metres at timeout fire (–1 if unavailable)
+};
+```
+
+### `EventLogQueryOptions`
+
+Passed to `getEventLogs()`.
+
+```ts
+type EventLogQueryOptions = {
+  limit?: number;          // Max entries (default: 1000, max: 10000)
+  eventType?: string;      // Filter by event name
+  sinceTimestamp?: number; // Only events after this ms-epoch timestamp
+};
+```
+
+### `EventLogEntry`
+
+Returned by `getEventLogs()`.
+
+```ts
+type EventLogEntry = {
+  id: number;                     // Auto-increment row ID
+  timestamp: number;              // Milliseconds since epoch
+  eventType: string;              // e.g. "onBeaconEnter"
+  identifier?: string;            // Beacon identifier, if available
+  data: Record<string, unknown>;  // Full event payload
 };
 ```
 

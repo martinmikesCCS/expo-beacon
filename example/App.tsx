@@ -17,10 +17,13 @@ import type {
   PairedBeacon,
   BeaconRegionEvent,
   BeaconDistanceEvent,
+  BeaconTimeoutEvent,
   EddystoneScanResult,
   PairedEddystone,
   EddystoneRegionEvent,
   EddystoneDistanceEvent,
+  EddystoneTimeoutEvent,
+  EventLogEntry as NativeEventLogEntry,
 } from "expo-beacon";
 
 interface EventLogEntry {
@@ -53,6 +56,10 @@ export default function App() {
 
   // Event log
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
+
+  // Event logging (SQLite)
+  const [isLoggingEnabled, setIsLoggingEnabled] = useState(false);
+  const [nativeEventLogs, setNativeEventLogs] = useState<NativeEventLogEntry[]>([]);
 
   // Refs for continuous scan subscriptions
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
@@ -132,6 +139,25 @@ export default function App() {
       },
     );
 
+    const beaconTimeoutSub = ExpoBeacon.addListener(
+      "onBeaconTimeout",
+      (event: BeaconTimeoutEvent) => {
+        addLog(
+          `TIMEOUT: ${event.identifier} (${event.uuid}) in range for configured duration at ~${event.distance >= 0 ? event.distance.toFixed(1) + "m" : "n/a"}`,
+          "enter",
+        );
+      },
+    );
+    const eddyTimeoutSub = ExpoBeacon.addListener(
+      "onEddystoneTimeout",
+      (event: EddystoneTimeoutEvent) => {
+        addLog(
+          `EDDY TIMEOUT: ${event.identifier} (${event.namespace}) in range for configured duration`,
+          "enter",
+        );
+      },
+    );
+
     return () => {
       enterSub.remove();
       exitSub.remove();
@@ -139,6 +165,8 @@ export default function App() {
       eddyEnterSub.remove();
       eddyExitSub.remove();
       eddyDistSub.remove();
+      beaconTimeoutSub.remove();
+      eddyTimeoutSub.remove();
     };
   }, [addLog]);
 
@@ -372,6 +400,39 @@ export default function App() {
       },
     });
     addLog("Notification config updated ✓");
+  };
+
+  // ── Event Logging (SQLite) ──
+
+  const handleToggleLogging = () => {
+    if (isLoggingEnabled) {
+      ExpoBeacon.disableEventLogging();
+      setIsLoggingEnabled(false);
+      addLog("Event logging disabled");
+    } else {
+      ExpoBeacon.enableEventLogging();
+      setIsLoggingEnabled(true);
+      addLog("Event logging enabled ✓");
+    }
+  };
+
+  const handleGetLogs = () => {
+    const logs = ExpoBeacon.getEventLogs({ limit: 50 });
+    setNativeEventLogs(logs);
+    addLog(`Fetched ${logs.length} event log(s)`);
+  };
+
+  const handleClearLogs = () => {
+    ExpoBeacon.clearEventLogs();
+    setNativeEventLogs([]);
+    addLog("Event logs cleared");
+  };
+
+  const handleDestroyLogs = () => {
+    ExpoBeacon.destroyEventLogs();
+    setIsLoggingEnabled(false);
+    setNativeEventLogs([]);
+    addLog("Event log database destroyed");
   };
 
   return (
@@ -679,6 +740,63 @@ export default function App() {
                 <Text style={styles.logMsg}>{entry.message}</Text>
               </View>
             ))
+          )}
+        </Section>
+
+        {/* ── SQLite Event Logging ── */}
+        <Section title="SQLite Event Logging">
+          <Text style={styles.hint}>
+            Persist all beacon events to a local SQLite database for diagnostics
+          </Text>
+          <View style={styles.row}>
+            <Text style={styles.label}>Logging:</Text>
+            <Switch
+              value={isLoggingEnabled}
+              onValueChange={handleToggleLogging}
+            />
+          </View>
+          {isLoggingEnabled && (
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusText}>● Logging Active</Text>
+            </View>
+          )}
+          <View style={styles.buttonRow}>
+            <View style={styles.buttonFlex}>
+              <Button title="Get Logs (50)" onPress={handleGetLogs} />
+            </View>
+            <View style={styles.buttonFlex}>
+              <Button
+                title="Clear Logs"
+                onPress={handleClearLogs}
+                color="#e67e22"
+              />
+            </View>
+            <View style={styles.buttonFlex}>
+              <Button
+                title="Destroy DB"
+                onPress={handleDestroyLogs}
+                color="#c0392b"
+              />
+            </View>
+          </View>
+          {nativeEventLogs.length > 0 && (
+            <View style={styles.list}>
+              <Text style={styles.label}>
+                Showing {nativeEventLogs.length} log(s):
+              </Text>
+              {nativeEventLogs.map((log) => (
+                <View key={log.id} style={styles.card}>
+                  <Text style={styles.cardTitle}>{log.eventType}</Text>
+                  <Text style={styles.cardMeta}>
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                    {log.identifier ? ` — ${log.identifier}` : ""}
+                  </Text>
+                  <Text style={styles.cardMeta} numberOfLines={2}>
+                    {JSON.stringify(log.data)}
+                  </Text>
+                </View>
+              ))}
+            </View>
           )}
         </Section>
       </ScrollView>

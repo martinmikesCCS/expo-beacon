@@ -10,6 +10,17 @@ internal const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
 internal const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
 internal const val NOTIFICATION_CONFIG_PREFS = "expo.beacon.notification_config"
 internal const val MONITORING_OPTIONS_PREFS = "expo.beacon.monitoring_options"
+internal const val EVENT_LOGGING_PREFS = "expo.beacon.event_logging"
+internal const val EVENT_LOGGING_ENABLED_KEY = "enabled"
+
+/** Foreground-service scan window for background monitoring responsiveness. */
+internal const val MONITORING_SCAN_PERIOD_MS = 1100L
+
+/** Gap between scan windows while the foreground service is active. */
+internal const val MONITORING_BETWEEN_SCAN_PERIOD_MS = 0L
+
+/** Ignore monitor-based exits if ranging saw the beacon within this window. */
+internal const val RECENT_RANGING_SIGHTING_GRACE_MS = 4000L
 
 /** Number of consecutive ranging misses before emitting a distance-based exit event. */
 internal const val EXIT_MISS_THRESHOLD = 3

@@ -8,6 +8,8 @@ import {
   PairedEddystone,
   NotificationConfig,
   MonitoringOptions,
+  EventLogQueryOptions,
+  EventLogEntry,
 } from "./ExpoBeacon.types";
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
@@ -46,6 +48,8 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
     uuid: string,
     major: number,
     minor: number,
+    name?: string,
+    timeoutSeconds?: number,
   ): void;
 
   /**
@@ -65,6 +69,8 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
     identifier: string,
     namespace: string,
     instance: string,
+    name?: string,
+    timeoutSeconds?: number,
   ): void;
 
   /**
@@ -115,6 +121,24 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
 
   /** Request Bluetooth + Location permissions. Returns true if granted. */
   requestPermissionsAsync(): Promise<boolean>;
+
+  /** Enable SQLite event logging. All beacon events will be persisted to a local database. */
+  enableEventLogging(): void;
+
+  /** Disable event logging. Previously logged events are retained. */
+  disableEventLogging(): void;
+
+  /**
+   * Retrieve logged beacon events from the SQLite database.
+   * @param options Optional filters (limit, eventType, sinceTimestamp).
+   */
+  getEventLogs(options?: EventLogQueryOptions): EventLogEntry[];
+
+  /** Delete all logged events from the database. */
+  clearEventLogs(): void;
+
+  /** Delete the entire event log database. Also disables logging. */
+  destroyEventLogs(): void;
 }
 
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

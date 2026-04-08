@@ -6,6 +6,8 @@ export type BeaconScanResult = {
   rssi: number; // Signal strength in dBm (negative number)
   distance: number; // Estimated distance in meters
   txPower: number; // Calibrated TX power
+  /** BLE advertising device name. May be undefined on iOS (CoreLocation does not expose it for iBeacon). */
+  name?: string;
 };
 
 /**
@@ -19,6 +21,14 @@ export type PairedBeacon = {
   uuid: string;
   major: number;
   minor: number;
+  /** BLE advertising device name, if provided at pairing time. */
+  name?: string;
+  /**
+   * Timeout in seconds. When set, the module fires `onBeaconTimeout` once
+   * after the beacon has been continuously in range for this duration.
+   * The timer resets if the beacon exits and re-enters range.
+   */
+  timeoutSeconds?: number;
 };
 
 /** Payload for enter/exit region events. */
@@ -38,6 +48,16 @@ export type BeaconDistanceEvent = {
   uuid: string;
   major: number;
   minor: number;
+  distance: number;
+};
+
+/** Payload for beacon timeout events (beacon in range for configured duration). */
+export type BeaconTimeoutEvent = {
+  identifier: string;
+  uuid: string;
+  major: number;
+  minor: number;
+  /** Current distance in metres at the time the timeout fired. */
   distance: number;
 };
 
@@ -128,6 +148,8 @@ export type EddystoneScanResult = {
   rssi: number;
   distance: number;
   txPower: number;
+  /** BLE advertising device name. */
+  name?: string;
 };
 
 /**
@@ -142,6 +164,14 @@ export type PairedEddystone = {
   namespace: string;
   /** 6-byte instance ID as hex string (12 chars). */
   instance: string;
+  /** BLE advertising device name, if provided at pairing time. */
+  name?: string;
+  /**
+   * Timeout in seconds. When set, the module fires `onEddystoneTimeout` once
+   * after the beacon has been continuously in range for this duration.
+   * The timer resets if the beacon exits and re-enters range.
+   */
+  timeoutSeconds?: number;
 };
 
 /** Payload for Eddystone enter/exit region events. */
@@ -162,11 +192,22 @@ export type EddystoneDistanceEvent = {
   distance: number;
 };
 
+/** Payload for Eddystone timeout events (beacon in range for configured duration). */
+export type EddystoneTimeoutEvent = {
+  identifier: string;
+  namespace: string;
+  instance: string;
+  /** Current distance in metres at the time the timeout fired. */
+  distance: number;
+};
+
 /** Module event map. */
 export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;
   onBeaconExit: (params: BeaconRegionEvent) => void;
   onBeaconDistance: (params: BeaconDistanceEvent) => void;
+  /** Fired once after a paired beacon has been continuously in range for its configured `timeoutSeconds`. */
+  onBeaconTimeout: (params: BeaconTimeoutEvent) => void;
   /** Fired continuously during a live scan as each iBeacon is detected. */
   onBeaconFound: (params: BeaconScanResult) => void;
   /** Fired continuously during a live scan as each Eddystone beacon is detected. */
@@ -174,4 +215,29 @@ export type ExpoBeaconModuleEvents = {
   onEddystoneEnter: (params: EddystoneRegionEvent) => void;
   onEddystoneExit: (params: EddystoneRegionEvent) => void;
   onEddystoneDistance: (params: EddystoneDistanceEvent) => void;
+  /** Fired once after a paired Eddystone has been continuously in range for its configured `timeoutSeconds`. */
+  onEddystoneTimeout: (params: EddystoneTimeoutEvent) => void;
+};
+
+/** Options for filtering event logs. */
+export type EventLogQueryOptions = {
+  /** Maximum number of log entries to return (default: 1000, max: 10000). */
+  limit?: number;
+  /** Filter by event type (e.g. "onBeaconEnter", "onBeaconExit"). */
+  eventType?: string;
+  /** Only return events with timestamp >= this value (ms since epoch). */
+  sinceTimestamp?: number;
+};
+
+/** A single logged beacon event entry. */
+export type EventLogEntry = {
+  id: number;
+  /** Timestamp in milliseconds since epoch. */
+  timestamp: number;
+  /** The event type that was logged (e.g. "onBeaconEnter"). */
+  eventType: string;
+  /** Beacon identifier, if available. */
+  identifier?: string;
+  /** The full event payload that was sent to JS. */
+  data: Record<string, unknown>;
 };
