@@ -315,7 +315,10 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                     HysteresisAction.NONE -> {}
                 }
             } else {
-                // No valid beacon reading — track consecutive misses for exit detection
+                // No valid beacon reading — break distance hysteresis streaks and
+                // track consecutive misses for disappearance-based exit detection.
+                enterCounters[region.uniqueId] = 0
+                exitCounters[region.uniqueId] = 0
                 val count = (missCounters[region.uniqueId] ?: 0) + 1
                 missCounters[region.uniqueId] = count
 

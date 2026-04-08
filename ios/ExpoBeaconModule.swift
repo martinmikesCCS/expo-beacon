@@ -988,7 +988,10 @@ public class ExpoBeaconModule: Module {
                 continue
             }
 
-            // Not seen recently — increment miss counter
+            // Not seen recently — break distance hysteresis streaks and, if the
+            // beacon was already entered, increment miss counter toward exit.
+            eddystoneEnterCounters[identifier] = 0
+            eddystoneExitCounters[identifier] = 0
             guard eddystoneEnteredRegions.contains(identifier) else { continue }
 
             let count = (eddystoneMissCounters[identifier] ?? 0) + 1
@@ -1263,6 +1266,8 @@ public class ExpoBeaconModule: Module {
                 // duplicate events when both monitoring and continuous scan are active.
             } else {
                 // No valid beacon reading — beacon may have disappeared
+                enterCounters[identifier] = 0
+                exitCounters[identifier] = 0
                 let count = (missCounters[identifier] ?? 0) + 1
                 missCounters[identifier] = count
 
