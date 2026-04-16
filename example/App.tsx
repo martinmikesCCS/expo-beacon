@@ -61,6 +61,9 @@ export default function App() {
   const [isLoggingEnabled, setIsLoggingEnabled] = useState(false);
   const [nativeEventLogs, setNativeEventLogs] = useState<NativeEventLogEntry[]>([]);
 
+  // Battery optimization (Android)
+  const [batteryOptExempt, setBatteryOptExempt] = useState<boolean | null>(null);
+
   // Refs for continuous scan subscriptions
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
   const eddystoneScanSubRef = useRef<{ remove: () => void } | null>(null);
@@ -190,7 +193,22 @@ export default function App() {
       addLog(`Permission error: ${e.message}`);
     }
   };
+  const handleCheckBatteryOpt = () => {
+    const exempt = ExpoBeacon.isBatteryOptimizationExempt();
+    setBatteryOptExempt(exempt);
+    addLog(exempt ? "Battery optimization: EXEMPT \u2713" : "Battery optimization: NOT exempt");
+  };
 
+  const handleRequestBatteryOpt = async () => {
+    try {
+      const result = await ExpoBeacon.requestBatteryOptimizationExemption();
+      addLog(result ? "Battery opt dialog shown" : "Battery opt request failed");
+      // Re-check after a short delay (user may still be interacting with dialog)
+      setTimeout(() => handleCheckBatteryOpt(), 1000);
+    } catch (e: any) {
+      addLog(`Battery opt error: ${e.message}`);
+    }
+  };
   // ── One-shot Scan (scanForBeaconsAsync / scanForEddystonesAsync) ──
 
   const handleOneShotScan = async () => {
@@ -323,7 +341,7 @@ export default function App() {
     if (beacon.frameType !== "uid" || !beacon.namespace || !beacon.instance)
       return;
     const identifier = `eddy-${beacon.namespace.slice(0, 8)}-${beacon.instance}`;
-    ExpoBeacon.pairEddystone(identifier, beacon.namespace, beacon.instance);
+    ExpoBeacon.pairEddystone(identifier, beacon.namespace, beacon.instance,"nigger",30);
     refreshPairedBeacons();
     addLog(`Paired Eddystone: ${identifier}`);
   };
@@ -446,6 +464,42 @@ export default function App() {
             title="Request Bluetooth & Location"
             onPress={handleRequestPermissions}
           />
+          {Platform.OS === "android" && (
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.hint}>
+                Samsung and other OEMs may throttle BLE scanning unless battery
+                optimization is disabled for this app.
+              </Text>
+              <View style={styles.buttonRow}>
+                <View style={styles.buttonFlex}>
+                  <Button
+                    title="Check Battery Opt"
+                    onPress={handleCheckBatteryOpt}
+                  />
+                </View>
+                <View style={styles.buttonFlex}>
+                  <Button
+                    title="Request Exemption"
+                    onPress={handleRequestBatteryOpt}
+                  />
+                </View>
+              </View>
+              {batteryOptExempt !== null && (
+                <View
+                  style={[
+                    styles.statusBadge,
+                    !batteryOptExempt && { backgroundColor: "#e67e22" },
+                  ]}
+                >
+                  <Text style={styles.statusText}>
+                    {batteryOptExempt
+                      ? "● Battery Opt Exempt"
+                      : "● Battery Opt Active (may throttle BLE)"}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </Section>
 
         {/* ── One-Shot Scan ── */}

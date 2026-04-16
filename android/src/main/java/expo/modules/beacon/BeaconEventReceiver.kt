@@ -24,6 +24,7 @@ class BeaconEventReceiver(
         val eventType = intent.getStringExtra("event") ?: return
         val beaconType = intent.getStringExtra("beaconType") ?: "ibeacon"
         val distance = intent.getDoubleExtra("distance", -1.0)
+        val rssi = intent.getIntExtra("rssi", 0)
 
         if (beaconType == "eddystone") {
             val namespace = intent.getStringExtra("namespace") ?: ""
@@ -34,7 +35,8 @@ class BeaconEventReceiver(
                 "namespace" to namespace,
                 "instance" to instance,
                 "event" to eventType,
-                "distance" to distance
+                "distance" to distance,
+                "rssi" to rssi
             )
 
             val eventName = when (eventType) {
@@ -56,7 +58,8 @@ class BeaconEventReceiver(
                 "major" to major,
                 "minor" to minor,
                 "event" to eventType,
-                "distance" to distance
+                "distance" to distance,
+                "rssi" to rssi
             )
 
             val eventName = when (eventType) {

@@ -7,7 +7,9 @@ import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.os.RemoteException
 import androidx.core.content.ContextCompat
 import expo.modules.interfaces.permissions.PermissionsStatus
@@ -279,6 +281,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
             var maxDistance: Double? = null
             var exitDistance: Double? = null
+            var minRssi: Int? = null
             when (options) {
                 is Double -> maxDistance = options
                 is Map<*, *> -> {
@@ -286,6 +289,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     val map = options as Map<String, Any?>
                     maxDistance = (map["maxDistance"] as? Number)?.toDouble()
                     exitDistance = (map["exitDistance"] as? Number)?.toDouble()
+                    minRssi = (map["minRssi"] as? Number)?.toInt()
                     val notifications = map["notifications"]
                     if (notifications is Map<*, *>) {
                         @Suppress("UNCHECKED_CAST")
@@ -316,6 +320,8 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     else remove("max_distance")
                     if (exitDistance != null) putString("exit_distance", exitDistance.toString())
                     else remove("exit_distance")
+                    if (minRssi != null) putInt("min_rssi", minRssi)
+                    else remove("min_rssi")
                 }.apply()
             // Verify we have the permissions needed for background monitoring
             val hasLocation = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -325,9 +331,25 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 promise.reject("PERMISSION_DENIED", "Location permissions required for background monitoring. Call requestPermissionsAsync() first.", null)
                 return@AsyncFunction
             }
+            // Android 12+ requires BLUETOOTH_SCAN for BLE operations;
+            // Android 14+ additionally requires it for connectedDevice foreground services.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val hasBtScan = ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+                val hasBtConnect = ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+                if (!hasBtScan || !hasBtConnect) {
+                    promise.reject("PERMISSION_DENIED", "Bluetooth permissions required for beacon monitoring. Call requestPermissionsAsync() first.", null)
+                    return@AsyncFunction
+                }
+            }
 
             registerEventReceiver()
-            BeaconForegroundService.start(ctx)
+            try {
+                BeaconForegroundService.start(ctx)
+            } catch (e: Exception) {
+                unregisterEventReceiver()
+                promise.reject("SERVICE_START_FAILED", "Failed to start monitoring service: ${e.message}", e)
+                return@AsyncFunction
+            }
             promise.resolve(null)
         }
 
@@ -429,6 +451,51 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             eventLogger?.close()
             eventLogger = null
             BeaconEventLogger.deleteLogDatabase(ctx)
+        }
+
+        // MARK: - API Forwarding
+
+        Function("setApiEndpoint") { url: String, apiKey: String? ->
+            val ctx = appContext.reactContext
+                ?: throw IllegalStateException("React context is not available")
+            BeaconApiForwarder(ctx).configure(url, apiKey)
+        }
+
+        // MARK: - Battery Optimization
+
+        Function("isBatteryOptimizationExempt") {
+            val ctx = appContext.reactContext ?: return@Function false
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                ?: return@Function false
+            pm.isIgnoringBatteryOptimizations(ctx.packageName)
+        }
+
+        AsyncFunction("requestBatteryOptimizationExemption") { promise: Promise ->
+            val ctx = appContext.reactContext ?: run {
+                promise.reject("NO_CONTEXT", "React context is not available", null)
+                return@AsyncFunction
+            }
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            if (pm == null) {
+                promise.resolve(false)
+                return@AsyncFunction
+            }
+            if (pm.isIgnoringBatteryOptimizations(ctx.packageName)) {
+                promise.resolve(true)
+                return@AsyncFunction
+            }
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${ctx.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                ctx.startActivity(intent)
+                // The system dialog is fire-and-forget; we cannot observe the result
+                // from a non-Activity context. Resolve true to indicate the dialog was shown.
+                promise.resolve(true)
+            } catch (e: Exception) {
+                promise.reject("BATTERY_OPT_ERROR", "Failed to open battery optimization settings: ${e.message}", e)
+            }
         }
 
         OnDestroy {

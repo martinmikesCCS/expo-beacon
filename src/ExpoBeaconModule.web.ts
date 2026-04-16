@@ -47,6 +47,8 @@ const stub = {
   getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] => notSupported(),
   clearEventLogs: (): void => notSupported(),
   destroyEventLogs: (): void => notSupported(),
+  isBatteryOptimizationExempt: (): boolean => true,
+  requestBatteryOptimizationExemption: (): Promise<boolean> => Promise.resolve(true),
   addListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => ({
     remove: () => {},
   }),

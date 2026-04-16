@@ -122,6 +122,20 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /** Request Bluetooth + Location permissions. Returns true if granted. */
   requestPermissionsAsync(): Promise<boolean>;
 
+  /**
+   * Check whether the app is exempt from Android battery optimizations.
+   * Always returns true on iOS and web (no equivalent concept).
+   */
+  isBatteryOptimizationExempt(): boolean;
+
+  /**
+   * Request exemption from Android battery optimizations.
+   * Opens the system dialog asking the user to whitelist this app.
+   * Returns true if the dialog was shown (or already exempt), false on failure.
+   * Always resolves true on iOS and web.
+   */
+  requestBatteryOptimizationExemption(): Promise<boolean>;
+
   /** Enable SQLite event logging. All beacon events will be persisted to a local database. */
   enableEventLogging(): void;
 
@@ -139,6 +153,16 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
 
   /** Delete the entire event log database. Also disables logging. */
   destroyEventLogs(): void;
+
+  /**
+   * Configure a remote API endpoint for native event forwarding.
+   * Once set, enter/exit/timeout events are POSTed directly from native code,
+   * ensuring delivery even when the JS bridge is not active (app backgrounded).
+   *
+   * @param url The API endpoint URL to POST events to.
+   * @param apiKey Optional API key sent as X-API-Key header.
+   */
+  setApiEndpoint(url: string, apiKey?: string): void;
 }
 
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

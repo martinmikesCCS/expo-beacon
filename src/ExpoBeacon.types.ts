@@ -40,6 +40,8 @@ export type BeaconRegionEvent = {
   event: "enter" | "exit";
   /** Measured distance in metres at the time of the event (–1 if unavailable). */
   distance: number;
+  /** Signal strength in dBm at the time of the event (0 if unavailable). */
+  rssi?: number;
 };
 
 /** Payload for periodic distance update events during monitoring. */
@@ -49,6 +51,8 @@ export type BeaconDistanceEvent = {
   major: number;
   minor: number;
   distance: number;
+  /** Signal strength in dBm (0 if unavailable). */
+  rssi?: number;
 };
 
 /** Payload for beacon timeout events (beacon in range for configured duration). */
@@ -129,6 +133,14 @@ export type MonitoringOptions = {
    * Only used when `maxDistance` is set.
    */
   exitDistance?: number;
+  /**
+   * Minimum RSSI (dBm) for a beacon reading to be considered valid.
+   * Readings below this threshold are discarded as unreliable, preventing
+   * false detections from reflected or distant signals.
+   *
+   * Default: -85. Typical range: -100 (very permissive) to -70 (strict).
+   */
+  minRssi?: number;
   /** Notification configuration overrides to apply for this monitoring session. */
   notifications?: NotificationConfig;
 };
@@ -182,6 +194,8 @@ export type EddystoneRegionEvent = {
   event: "enter" | "exit";
   /** Measured distance in metres at the time of the event (–1 if unavailable). */
   distance: number;
+  /** Signal strength in dBm at the time of the event (0 if unavailable). */
+  rssi?: number;
 };
 
 /** Payload for periodic Eddystone distance update events during monitoring. */
@@ -190,6 +204,8 @@ export type EddystoneDistanceEvent = {
   namespace: string;
   instance: string;
   distance: number;
+  /** Signal strength in dBm (0 if unavailable). */
+  rssi?: number;
 };
 
 /** Payload for Eddystone timeout events (beacon in range for configured duration). */
