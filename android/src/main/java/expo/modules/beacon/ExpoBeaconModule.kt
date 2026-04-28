@@ -85,15 +85,17 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     override fun definition() = ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError")
 
         AsyncFunction("scanForBeaconsAsync") { uuids: List<String>?, scanDurationMs: Int, promise: Promise ->
             if (scanDurationMs <= 0) {
                 promise.reject("INVALID_DURATION", "Scan duration must be a positive integer", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_DURATION", "message" to "Scan duration must be a positive integer"))
                 return@AsyncFunction
             }
             if (scanPromise != null || eddystoneScanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SCAN_IN_PROGRESS", "message" to "A scan is already running"))
                 return@AsyncFunction
             }
             scanResults.clear()
@@ -120,12 +122,14 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             if (scanPromise != null) {
                 cancelActiveScan()
                 scanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SCAN_CANCELLED", "message" to "Scan was cancelled"))
                 scanPromise = null
                 scanUuidFilter = emptySet()
             }
             if (eddystoneScanPromise != null) {
                 cancelActiveScan()
                 eddystoneScanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SCAN_CANCELLED", "message" to "Scan was cancelled"))
                 eddystoneScanPromise = null
             }
             unbindIfIdle()
@@ -158,10 +162,12 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         AsyncFunction("scanForEddystonesAsync") { scanDurationMs: Int, promise: Promise ->
             if (scanDurationMs <= 0) {
                 promise.reject("INVALID_DURATION", "Scan duration must be a positive integer", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_DURATION", "message" to "Scan duration must be a positive integer"))
                 return@AsyncFunction
             }
             if (scanPromise != null || eddystoneScanPromise != null) {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already running", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SCAN_IN_PROGRESS", "message" to "A scan is already running"))
                 return@AsyncFunction
             }
             scanResults.clear()
@@ -277,11 +283,13 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         AsyncFunction("startMonitoring") { options: Any?, promise: Promise ->
             val ctx = appContext.reactContext ?: run {
                 promise.reject("NO_CONTEXT", "React context is not available", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "NO_CONTEXT", "message" to "React context is not available"))
                 return@AsyncFunction
             }
             var maxDistance: Double? = null
             var exitDistance: Double? = null
             var minRssi: Int? = null
+            var level: String = "all"
             when (options) {
                 is Double -> maxDistance = options
                 is Map<*, *> -> {
@@ -290,6 +298,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     maxDistance = (map["maxDistance"] as? Number)?.toDouble()
                     exitDistance = (map["exitDistance"] as? Number)?.toDouble()
                     minRssi = (map["minRssi"] as? Number)?.toInt()
+                    level = (map["level"] as? String) ?: "all"
                     val notifications = map["notifications"]
                     if (notifications is Map<*, *>) {
                         @Suppress("UNCHECKED_CAST")
@@ -300,18 +309,22 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
             if (maxDistance != null && (!maxDistance.isFinite() || maxDistance <= 0.0)) {
                 promise.reject("INVALID_MAX_DISTANCE", "maxDistance must be a finite number greater than 0", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_MAX_DISTANCE", "message" to "maxDistance must be a finite number greater than 0"))
                 return@AsyncFunction
             }
             if (exitDistance != null && (!exitDistance.isFinite() || exitDistance <= 0.0)) {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance must be a finite number greater than 0", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_EXIT_DISTANCE", "message" to "exitDistance must be a finite number greater than 0"))
                 return@AsyncFunction
             }
             if (exitDistance != null && maxDistance == null) {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance requires maxDistance to be set", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_EXIT_DISTANCE", "message" to "exitDistance requires maxDistance to be set"))
                 return@AsyncFunction
             }
             if (maxDistance != null && exitDistance != null && exitDistance < maxDistance) {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance must be greater than or equal to maxDistance", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_EXIT_DISTANCE", "message" to "exitDistance must be greater than or equal to maxDistance"))
                 return@AsyncFunction
             }
             ctx.getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
@@ -322,6 +335,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     else remove("exit_distance")
                     if (minRssi != null) putInt("min_rssi", minRssi)
                     else remove("min_rssi")
+                    putString("level", level)
                 }.apply()
             // Verify we have the permissions needed for background monitoring
             val hasLocation = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -329,6 +343,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
             if (!hasLocation || !hasBgLocation) {
                 promise.reject("PERMISSION_DENIED", "Location permissions required for background monitoring. Call requestPermissionsAsync() first.", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "PERMISSION_DENIED", "message" to "Location permissions required for background monitoring. Call requestPermissionsAsync() first."))
                 return@AsyncFunction
             }
             // Android 12+ requires BLUETOOTH_SCAN for BLE operations;
@@ -338,6 +353,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 val hasBtConnect = ContextCompat.checkSelfPermission(ctx, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
                 if (!hasBtScan || !hasBtConnect) {
                     promise.reject("PERMISSION_DENIED", "Bluetooth permissions required for beacon monitoring. Call requestPermissionsAsync() first.", null)
+                    sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "PERMISSION_DENIED", "message" to "Bluetooth permissions required for beacon monitoring. Call requestPermissionsAsync() first."))
                     return@AsyncFunction
                 }
             }
@@ -348,6 +364,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             } catch (e: Exception) {
                 unregisterEventReceiver()
                 promise.reject("SERVICE_START_FAILED", "Failed to start monitoring service: ${e.message}", e)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SERVICE_START_FAILED", "message" to "Failed to start monitoring service: ${e.message}"))
                 return@AsyncFunction
             }
             promise.resolve(null)
@@ -362,6 +379,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         AsyncFunction("stopMonitoring") { promise: Promise ->
             val ctx = appContext.reactContext ?: run {
                 promise.reject("NO_CONTEXT", "React context is not available", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "NO_CONTEXT", "message" to "React context is not available"))
                 return@AsyncFunction
             }
             BeaconForegroundService.stop(ctx)
@@ -455,10 +473,44 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
 
         // MARK: - API Forwarding
 
-        Function("setApiEndpoint") { url: String, apiKey: String? ->
+        Function("setApiEndpoint") { url: String, apiKey: String?, id: String? ->
             val ctx = appContext.reactContext
                 ?: throw IllegalStateException("React context is not available")
-            BeaconApiForwarder(ctx).configure(url, apiKey)
+            BeaconApiForwarder(ctx).configure(url, apiKey, id)
+        }
+
+        Function("getApiEndpoint") {
+            val ctx = appContext.reactContext
+                ?: throw IllegalStateException("React context is not available")
+            BeaconApiForwarder(ctx).getConfig()
+        }
+
+        Function("getMonitoringConfig") {
+            val ctx = appContext.reactContext
+                ?: throw IllegalStateException("React context is not available")
+            val optPrefs = ctx.getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
+            buildMap<String, Any?> {
+                put("isMonitoring", BeaconForegroundService.isMonitoringActive(ctx))
+                optPrefs.getString("max_distance", null)?.toDoubleOrNull()?.let { put("maxDistance", it) }
+                optPrefs.getString("exit_distance", null)?.toDoubleOrNull()?.let { put("exitDistance", it) }
+                if (optPrefs.contains("min_rssi")) put("minRssi", optPrefs.getInt("min_rssi", -85))
+                optPrefs.getString("level", null)?.let { put("level", it) }
+                val json = ctx.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
+                    .getString("config", null)
+                if (json != null) {
+                    try {
+                        put("notifications", jsonToMap(org.json.JSONObject(json)))
+                    } catch (_: Exception) { /* ignore malformed JSON */ }
+                }
+            }
+        }
+
+        Function("getMonitoredDeviceState") { identifier: String ->
+            buildMonitoredDeviceState(identifier)
+        }
+
+        Function("getMonitoredDeviceStates") {
+            buildMonitoredDeviceStates()
         }
 
         // MARK: - Battery Optimization
@@ -473,6 +525,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         AsyncFunction("requestBatteryOptimizationExemption") { promise: Promise ->
             val ctx = appContext.reactContext ?: run {
                 promise.reject("NO_CONTEXT", "React context is not available", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "NO_CONTEXT", "message" to "React context is not available"))
                 return@AsyncFunction
             }
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -495,6 +548,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 promise.resolve(true)
             } catch (e: Exception) {
                 promise.reject("BATTERY_OPT_ERROR", "Failed to open battery optimization settings: ${e.message}", e)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "BATTERY_OPT_ERROR", "message" to "Failed to open battery optimization settings: ${e.message}"))
             }
         }
 
@@ -743,6 +797,101 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
         }
         return json
+    }
+
+    private fun jsonToMap(obj: JSONObject): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        for (key in obj.keys()) {
+            val value = obj.opt(key)
+            map[key] = when (value) {
+                is JSONObject -> jsonToMap(value)
+                JSONObject.NULL -> null
+                else -> value
+            }
+        }
+        return map
+    }
+
+    private fun buildMonitoredDeviceState(identifier: String): Map<String, Any?>? {
+        val runtimeStates = BeaconForegroundService.getMonitoringRuntimeSnapshot()
+
+        val beacons = loadPairedBeaconsJson()
+        for (i in 0 until beacons.length()) {
+            val beacon = beacons.getJSONObject(i)
+            if (beacon.getString("identifier") == identifier) {
+                return buildIBeaconMonitoringState(beacon, runtimeStates[identifier])
+            }
+        }
+
+        val eddystones = loadPairedEddystonesJson()
+        for (i in 0 until eddystones.length()) {
+            val eddystone = eddystones.getJSONObject(i)
+            if (eddystone.getString("identifier") == identifier) {
+                return buildEddystoneMonitoringState(eddystone, runtimeStates[identifier])
+            }
+        }
+
+        return null
+    }
+
+    private fun buildMonitoredDeviceStates(): List<Map<String, Any?>> {
+        val runtimeStates = BeaconForegroundService.getMonitoringRuntimeSnapshot()
+        val states = mutableListOf<Map<String, Any?>>()
+
+        val beacons = loadPairedBeaconsJson()
+        for (i in 0 until beacons.length()) {
+            val beacon = beacons.getJSONObject(i)
+            val identifier = beacon.getString("identifier")
+            states.add(buildIBeaconMonitoringState(beacon, runtimeStates[identifier]))
+        }
+
+        val eddystones = loadPairedEddystonesJson()
+        for (i in 0 until eddystones.length()) {
+            val eddystone = eddystones.getJSONObject(i)
+            val identifier = eddystone.getString("identifier")
+            states.add(buildEddystoneMonitoringState(eddystone, runtimeStates[identifier]))
+        }
+
+        return states
+    }
+
+    private fun buildIBeaconMonitoringState(
+        beacon: JSONObject,
+        runtimeState: BeaconForegroundService.MonitoringRuntimeState?
+    ): Map<String, Any?> {
+        val identifier = beacon.getString("identifier")
+        return buildMap<String, Any?> {
+            put("kind", "ibeacon")
+            put("identifier", identifier)
+            put("uuid", beacon.getString("uuid"))
+            put("major", beacon.getInt("major"))
+            put("minor", beacon.getInt("minor"))
+            put("state", if (runtimeState?.isEntered == true) "entered" else "exited")
+            put("distance", normalizedMonitoringDistance(runtimeState))
+        }
+    }
+
+    private fun buildEddystoneMonitoringState(
+        eddystone: JSONObject,
+        runtimeState: BeaconForegroundService.MonitoringRuntimeState?
+    ): Map<String, Any?> {
+        val identifier = eddystone.getString("identifier")
+        return buildMap<String, Any?> {
+            put("kind", "eddystone")
+            put("identifier", identifier)
+            put("namespace", eddystone.getString("namespace"))
+            put("instance", eddystone.getString("instance"))
+            put("state", if (runtimeState?.isEntered == true) "entered" else "exited")
+            put("distance", normalizedMonitoringDistance(runtimeState))
+        }
+    }
+
+    private fun normalizedMonitoringDistance(
+        runtimeState: BeaconForegroundService.MonitoringRuntimeState?
+    ): Double? {
+        if (runtimeState?.isEntered != true) return null
+        val distance = runtimeState.distance ?: return null
+        return distance.takeIf { !it.isNaN() && !it.isInfinite() && it >= 0 }
     }
 
     // --- Shared Preferences helpers ---

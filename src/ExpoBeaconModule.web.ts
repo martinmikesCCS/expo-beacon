@@ -4,9 +4,10 @@ import type {
   EddystoneScanResult,
   PairedBeacon,
   PairedEddystone,
+  MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types";
+} from "./ExpoBeacon.types.js";
 
 const notSupported = (): never => {
   throw new Error("expo-beacon is not supported on web.");
@@ -47,6 +48,10 @@ const stub = {
   getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] => notSupported(),
   clearEventLogs: (): void => notSupported(),
   destroyEventLogs: (): void => notSupported(),
+  getMonitoringConfig: () => notSupported(),
+  getMonitoredDeviceState: (_identifier: string): MonitoredDeviceState | null => notSupported(),
+  getMonitoredDeviceStates: (): MonitoredDeviceState[] => notSupported(),
+  getApiEndpoint: (): { url: string | null; apiKey: string | null; id: string | null } => notSupported(),
   isBatteryOptimizationExempt: (): boolean => true,
   requestBatteryOptimizationExemption: (): Promise<boolean> => Promise.resolve(true),
   addListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => ({

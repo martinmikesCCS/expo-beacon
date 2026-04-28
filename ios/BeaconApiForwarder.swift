@@ -3,6 +3,7 @@ import os.log
 
 private let API_URL_KEY = "expo.beacon.api_url"
 private let API_KEY_KEY = "expo.beacon.api_key"
+private let ID_KEY = "expo.beacon.id"
 private let MAX_RETRIES = 3
 
 /// Fire-and-forget HTTP event forwarder for beacon events.
@@ -28,19 +29,25 @@ final class BeaconApiForwarder {
         self.session = URLSession(configuration: config)
     }
 
-    func configure(url: String, apiKey: String?) {
+    func configure(url: String, apiKey: String?, id: String? = nil) {
         defaults.set(url, forKey: API_URL_KEY)
         if let key = apiKey {
             defaults.set(key, forKey: API_KEY_KEY)
         } else {
             defaults.removeObject(forKey: API_KEY_KEY)
         }
+        if let id = id {
+            defaults.set(id, forKey: ID_KEY)
+        } else {
+            defaults.removeObject(forKey: ID_KEY)
+        }
     }
 
     func getConfig() -> [String: String?] {
         return [
             "url": defaults.string(forKey: API_URL_KEY),
-            "apiKey": defaults.string(forKey: API_KEY_KEY)
+            "apiKey": defaults.string(forKey: API_KEY_KEY),
+            "id": defaults.string(forKey: ID_KEY)
         ]
     }
 
@@ -55,6 +62,9 @@ final class BeaconApiForwarder {
         let apiKey = defaults.string(forKey: API_KEY_KEY)
 
         var payload = params
+        if let id = defaults.string(forKey: ID_KEY), !id.isEmpty {
+            payload["id"] = id
+        }
         payload["timestamp"] = Int64(Date().timeIntervalSince1970 * 1000)
         payload["platform"] = "ios"
         payload["sdkVersion"] = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
@@ -72,7 +82,7 @@ final class BeaconApiForwarder {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let key = apiKey {
-            request.setValue(key, forHTTPHeaderField: "X-API-Key")
+            request.setValue(key, forHTTPHeaderField: "X-CSFR-Token")
         }
         request.httpBody = body
 

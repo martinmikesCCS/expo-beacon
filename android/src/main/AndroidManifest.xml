@@ -48,13 +48,17 @@
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
 
-        <!-- Restart monitoring after boot -->
+        <!-- Restart monitoring after boot.
+             android:exported="true" is required for the system to deliver BOOT_COMPLETED.
+             No android:permission — the incorrect RECEIVE_BOOT_COMPLETED attribute was
+             restricting incoming broadcasts instead of restricting who can receive them. -->
         <receiver
             android:name="expo.modules.beacon.BootReceiver"
-            android:exported="true"
-            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Self-scheduled retry when BT isn't ready at boot -->
+                <action android:name="expo.modules.beacon.ACTION_RETRY_MONITORING" />
             </intent-filter>
         </receiver>
     </application>

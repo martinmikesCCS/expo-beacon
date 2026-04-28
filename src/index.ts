@@ -1,5 +1,5 @@
 // Native module (default export)
-export { default } from "./ExpoBeaconModule";
+export { default } from "./ExpoBeaconModule.js";
 
 // All public types
 export type {
@@ -11,6 +11,8 @@ export type {
   ExpoBeaconModuleEvents,
   NotificationConfig,
   MonitoringOptions,
+  MonitoringConfig,
+  MonitoredDeviceState,
   BeaconNotificationConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
@@ -22,4 +24,4 @@ export type {
   EddystoneTimeoutEvent,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types";
+} from "./ExpoBeacon.types.js";

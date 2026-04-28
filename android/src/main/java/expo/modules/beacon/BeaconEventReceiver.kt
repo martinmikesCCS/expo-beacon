@@ -22,6 +22,19 @@ class BeaconEventReceiver(
 
         val identifier = intent.getStringExtra("identifier") ?: return
         val eventType = intent.getStringExtra("event") ?: return
+
+        // Handle error events uniformly — no beacon coordinates needed
+        if (eventType == "error") {
+            val errorCode = intent.getStringExtra("errorCode") ?: ""
+            val errorMessage = intent.getStringExtra("errorMessage") ?: ""
+            onEvent("onBeaconError", mapOf(
+                "identifier" to identifier,
+                "code" to errorCode,
+                "message" to errorMessage
+            ))
+            return
+        }
+
         val beaconType = intent.getStringExtra("beaconType") ?: "ibeacon"
         val distance = intent.getDoubleExtra("distance", -1.0)
         val rssi = intent.getIntExtra("rssi", 0)

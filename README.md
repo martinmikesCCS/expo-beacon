@@ -52,6 +52,9 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [getPairedEddystones()](#getpairededdystones)
   - [startMonitoring()](#startmonitoringoptions)
   - [stopMonitoring()](#stopmonitoring)
+  - [getMonitoringConfig()](#getmonitoringconfig)
+  - [getMonitoredDeviceState()](#getmonitoreddevicestateidentifier)
+  - [getMonitoredDeviceStates()](#getmonitoreddevicestates)
   - [setNotificationConfig()](#setnotificationconfigconfig)
   - [enableEventLogging()](#enableeventlogging)
   - [disableEventLogging()](#disableeventlogging)
@@ -60,6 +63,8 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [destroyEventLogs()](#destroyeventlogs)
 - [Events](#events)
 - [TypeScript Types](#typescript-types)
+- [Native Integrations](#native-integrations)
+  - [react-native-background-geolocation](#react-native-background-geolocation)
 - [Background Behaviour](#background-behaviour)
 - [Notifications](#notifications)
 - [Platform-Specific Notes & Gotchas](#platform-specific-notes--gotchas)
@@ -1001,6 +1006,76 @@ await ExpoBeacon.stopMonitoring();
 
 ---
 
+### `getMonitoringConfig()`
+
+```ts
+getMonitoringConfig(): MonitoringConfig
+```
+
+Returns the current monitoring configuration snapshot, including whether background monitoring is active.
+
+This reads the native monitoring settings currently persisted by the module. Option fields are omitted when they have not been explicitly set.
+
+```ts
+const config = ExpoBeacon.getMonitoringConfig();
+// {
+//   isMonitoring: true,
+//   maxDistance: 10,
+//   exitDistance: 15,
+//   minRssi: -85,
+//   level: "all"
+// }
+```
+
+---
+
+### `getMonitoredDeviceState(identifier)`
+
+```ts
+getMonitoredDeviceState(identifier: string): MonitoredDeviceState | null
+```
+
+Returns the current monitoring-state snapshot for a paired iBeacon or Eddystone with the matching identifier.
+
+- `state` is `"entered"` or `"exited"`.
+- `distance` is `null` when the device is currently exited or there is no live reading yet.
+- Returns `null` when no paired device matches the identifier.
+
+Identifiers should be unique across all paired monitored devices.
+
+```ts
+const lobby = ExpoBeacon.getMonitoredDeviceState("lobby-entrance");
+// {
+//   kind: "ibeacon",
+//   identifier: "lobby-entrance",
+//   uuid: "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0",
+//   major: 1,
+//   minor: 100,
+//   state: "entered",
+//   distance: 2.4
+// }
+```
+
+---
+
+### `getMonitoredDeviceStates()`
+
+```ts
+getMonitoredDeviceStates(): MonitoredDeviceState[]
+```
+
+Returns the current monitoring-state snapshots for all paired monitored devices across iBeacon and Eddystone.
+
+```ts
+const states = ExpoBeacon.getMonitoredDeviceStates();
+// [
+//   { kind: "ibeacon", identifier: "lobby-entrance", state: "entered", distance: 2.4, ... },
+//   { kind: "eddystone", identifier: "meeting-room", state: "exited", distance: null, ... }
+// ]
+```
+
+---
+
 ### `setNotificationConfig(config)`
 
 ```ts
@@ -1390,8 +1465,49 @@ Passed to `startMonitoring()`.
 type MonitoringOptions = {
   maxDistance?: number;
   exitDistance?: number;
+  minRssi?: number;
+  level?: "all" | "events";
+};
+```
+
+### `MonitoringConfig`
+
+Returned by `getMonitoringConfig()`.
+
+```ts
+type MonitoringConfig = {
+  isMonitoring: boolean;
+  maxDistance?: number;
+  exitDistance?: number;
+  minRssi?: number;
+  level?: "all" | "events";
   notifications?: NotificationConfig;
 };
+```
+
+### `MonitoredDeviceState`
+
+Returned by `getMonitoredDeviceState()` and `getMonitoredDeviceStates()`.
+
+```ts
+type MonitoredDeviceState =
+  | {
+      kind: "ibeacon";
+      identifier: string;
+      uuid: string;
+      major: number;
+      minor: number;
+      state: "entered" | "exited";
+      distance: number | null;
+    }
+  | {
+      kind: "eddystone";
+      identifier: string;
+      namespace: string;
+      instance: string;
+      state: "entered" | "exited";
+      distance: number | null;
+    };
 ```
 
 ### `NotificationConfig`
@@ -1413,6 +1529,7 @@ type BeaconNotificationConfig = {
   enabled?: boolean;     // Default: true. Set false to suppress.
   enterTitle?: string;   // Default: "Beacon Entered"
   exitTitle?: string;    // Default: "Beacon Exited"
+  timeoutTitle?: string; // Default: "Beacon Timeout"
   body?: string;         // Default: "{identifier} region {event}ed"
                          // Supports {identifier} and {event} placeholders.
   sound?: boolean;       // iOS only. Default: true
@@ -1491,6 +1608,148 @@ type EventLogEntry = {
   identifier?: string;            // Beacon identifier, if available
   data: Record<string, unknown>;  // Full event payload
 };
+```
+
+---
+
+## Native Integrations
+
+Dispatching work in response to beacon enter/exit events can be done at the native level, before the JS bridge is involved. expo-beacon exposes a plugin registry on both platforms for this purpose.
+
+When a plugin is registered, `onBeaconEnter` / `onBeaconExit` (and their Eddystone equivalents) are called synchronously inside the same choke point that fires the JS event — so the native side-effect is guaranteed even when the JS thread is sleeping.
+
+### react-native-background-geolocation
+
+This integration starts BGLocation when any beacon is entered and stops it when all beacons are exited.
+
+> **Requirement**: bare workflow or `npx expo prebuild`. Does not work with Expo Go.
+
+#### 1. Install packages
+
+```sh
+npx expo install expo-beacon react-native-background-geolocation
+```
+
+Follow [react-native-background-geolocation's native setup](https://transistorsoft.github.io/react-native-background-geolocation) — it requires extra Gradle / CocoaPods config and a license key.
+
+#### 2. Add the Expo config plugin
+
+In `app.json` (or `app.config.js`), add `expo-beacon/plugin/withBeaconBGLocation` to your plugins list:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      "expo-beacon/plugin/withBeaconBGLocation"
+    ]
+  }
+}
+```
+
+Then run prebuild to apply the native changes:
+
+```sh
+npx expo prebuild --clean
+```
+
+The plugin writes `BeaconGeoPlugin.swift` / `BeaconGeoPlugin.kt` into your native project and wires them up in `AppDelegate.swift` and `MainApplication.kt` automatically.
+
+#### 3. Configure BGLocation once at JS startup
+
+Call `ready()` once when your app starts, **not** inside a beacon callback:
+
+```ts
+import BackgroundGeolocation from 'react-native-background-geolocation';
+
+BackgroundGeolocation.ready({
+  desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
+  distanceFilter: 10,
+  stopOnTerminate: false,
+  startOnBoot: true,
+  // ...your config
+});
+```
+
+#### How it works at runtime
+
+```
+Beacon region entered (native)
+  → BeaconForegroundService / ExpoBeaconModule (expo-beacon)
+  → BeaconPluginRegistry / BeaconLifecycleRegistry dispatches to plugins
+  → BeaconGeoPlugin.onBeaconEnter / beaconDidEnter
+  → BackgroundGeolocation.start()   ← native only, no JS bridge involved
+```
+
+---
+
+#### Manual wiring (without the config plugin)
+
+If you prefer not to use `expo prebuild` (e.g. you manage your native project manually), create the following files yourself after each `npx expo prebuild`:
+
+**iOS** — `ios/<AppName>/BeaconGeoPlugin.swift` (add to Xcode target):
+
+```swift
+import ExpoBeacon
+import TSLocationManager
+
+final class BeaconGeoPlugin: BeaconLifecycleDelegate {
+    func beaconDidEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+        TSLocationManager.sharedManager().start()
+    }
+    func beaconDidExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+        TSLocationManager.sharedManager().stop()
+    }
+    func eddystoneDidEnter(identifier: String, namespace: String, instance: String, distance: Double) {
+        TSLocationManager.sharedManager().start()
+    }
+    func eddystoneDidExit(identifier: String, namespace: String, instance: String, distance: Double) {
+        TSLocationManager.sharedManager().stop()
+    }
+}
+```
+
+Register in `ios/<AppName>/AppDelegate.swift` **before** `super`:
+
+```swift
+import ExpoBeacon
+
+// in application(_:didFinishLaunchingWithOptions:):
+BeaconLifecycleRegistry.register(BeaconGeoPlugin()) // ← before super
+return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+```
+
+**Android** — `android/app/src/main/java/<pkg>/BeaconGeoPlugin.kt`:
+
+```kotlin
+package com.yourapp
+
+import android.content.Context
+import com.transistorsoft.locationmanager.adapter.BackgroundGeolocation
+import expo.modules.beacon.BeaconEventPlugin
+
+class BeaconGeoPlugin(ctx: Context) : BeaconEventPlugin {
+    private val bgGeo = BackgroundGeolocation.getInstance(ctx, null)
+
+    override fun onBeaconEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
+        bgGeo.start(null)
+    override fun onBeaconExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
+        bgGeo.stop(null)
+    override fun onEddystoneEnter(identifier: String, namespace: String, instance: String, distance: Double) =
+        bgGeo.start(null)
+    override fun onEddystoneExit(identifier: String, namespace: String, instance: String, distance: Double) =
+        bgGeo.stop(null)
+}
+```
+
+Register in `MainApplication.kt` inside `onCreate()` after `super`:
+
+```kotlin
+import expo.modules.beacon.BeaconPluginRegistry
+
+override fun onCreate() {
+    super.onCreate()
+    BeaconPluginRegistry.register(BeaconGeoPlugin(this)) // ← after super
+}
 ```
 
 ---

@@ -27,6 +27,9 @@ export type PairedBeacon = {
    * Timeout in seconds. When set, the module fires `onBeaconTimeout` once
    * after the beacon has been continuously in range for this duration.
    * The timer resets if the beacon exits and re-enters range.
+   *
+   * The timeout countdown also starts if no BLE readings are received
+   * for 60 seconds (e.g. due to Doze mode or background throttling).
    */
   timeoutSeconds?: number;
 };
@@ -73,6 +76,8 @@ export type BeaconNotificationConfig = {
   enterTitle?: string;
   /** Notification title on beacon exit. Default: "Beacon Exited". */
   exitTitle?: string;
+  /** Notification title on beacon timeout. Default: "Beacon Timeout". */
+  timeoutTitle?: string;
   /**
    * Notification body template. Supports {identifier} and {event} placeholders.
    * Default: "{identifier} region {event}ed".
@@ -117,6 +122,39 @@ export type NotificationConfig = {
   channel?: NotificationChannelConfig;
 };
 
+/** Snapshot of the current monitoring configuration and active state. */
+export type MonitoringConfig = {
+  /** Whether background monitoring is currently active. */
+  isMonitoring: boolean;
+  maxDistance?: number;
+  exitDistance?: number;
+  minRssi?: number;
+  level?: 'all' | 'events';
+  notifications?: NotificationConfig;
+};
+
+/** Current state snapshot for a paired monitored device. */
+export type MonitoredDeviceState =
+  | {
+      kind: "ibeacon";
+      identifier: string;
+      uuid: string;
+      major: number;
+      minor: number;
+      state: "entered" | "exited";
+      /** Current distance in metres, or null when exited or no live reading is available. */
+      distance: number | null;
+    }
+  | {
+      kind: "eddystone";
+      identifier: string;
+      namespace: string;
+      instance: string;
+      state: "entered" | "exited";
+      /** Current distance in metres, or null when exited or no live reading is available. */
+      distance: number | null;
+    };
+
 /** Options accepted by startMonitoring(). */
 export type MonitoringOptions = {
   /**
@@ -141,6 +179,13 @@ export type MonitoringOptions = {
    * Default: -85. Typical range: -100 (very permissive) to -70 (strict).
    */
   minRssi?: number;
+  /**
+   * Controls which event types are emitted, logged, and forwarded to the API.
+   *
+   * - `'all'` (default): distance + enter + exit + timeout events.
+   * - `'events'`: enter + exit + timeout only (no distance events).
+   */
+  level?: 'all' | 'events';
   /** Notification configuration overrides to apply for this monitoring session. */
   notifications?: NotificationConfig;
 };
@@ -182,6 +227,9 @@ export type PairedEddystone = {
    * Timeout in seconds. When set, the module fires `onEddystoneTimeout` once
    * after the beacon has been continuously in range for this duration.
    * The timer resets if the beacon exits and re-enters range.
+   *
+   * The timeout countdown also starts if no BLE readings are received
+   * for 60 seconds (e.g. due to Doze mode or background throttling).
    */
   timeoutSeconds?: number;
 };
@@ -217,6 +265,16 @@ export type EddystoneTimeoutEvent = {
   distance: number;
 };
 
+/** Payload for native beacon error events (monitoring/ranging failures). */
+export type BeaconErrorEvent = {
+  /** Region or constraint identifier, empty string if unavailable. */
+  identifier: string;
+  /** Machine-readable error code (e.g. "MONITORING_FAILED", "RANGING_FAILED", "SECURITY_EXCEPTION"). */
+  code: string;
+  /** Human-readable error message from the native layer. */
+  message: string;
+};
+
 /** Module event map. */
 export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;
@@ -233,6 +291,8 @@ export type ExpoBeaconModuleEvents = {
   onEddystoneDistance: (params: EddystoneDistanceEvent) => void;
   /** Fired once after a paired Eddystone has been continuously in range for its configured `timeoutSeconds`. */
   onEddystoneTimeout: (params: EddystoneTimeoutEvent) => void;
+  /** Fired when a native monitoring or ranging failure occurs (logged to DB and forwarded to JS). */
+  onBeaconError: (params: BeaconErrorEvent) => void;
 };
 
 /** Options for filtering event logs. */

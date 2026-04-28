@@ -8,9 +8,11 @@ import {
   PairedEddystone,
   NotificationConfig,
   MonitoringOptions,
+  MonitoringConfig,
+  MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types";
+} from "./ExpoBeacon.types.js";
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /**
@@ -156,13 +158,37 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
 
   /**
    * Configure a remote API endpoint for native event forwarding.
-   * Once set, enter/exit/timeout events are POSTed directly from native code,
+   * Once set, beacon events are POSTed directly from native code,
    * ensuring delivery even when the JS bridge is not active (app backgrounded).
    *
    * @param url The API endpoint URL to POST events to.
-   * @param apiKey Optional API key sent as X-API-Key header.
+   * @param apiKey Optional API key sent as X-CSFR-Token header.
+   * @param id Optional identifier appended to every forwarded event payload.
    */
-  setApiEndpoint(url: string, apiKey?: string): void;
+  setApiEndpoint(url: string, apiKey?: string, id?: string): void;
+
+  /**
+   * Return the current monitoring configuration and active state.
+   * Option fields are undefined if not explicitly set.
+   */
+  getMonitoringConfig(): MonitoringConfig;
+
+  /**
+   * Return the current state snapshot for a paired monitored device.
+   * Returns null when no paired device matches the identifier.
+   */
+  getMonitoredDeviceState(identifier: string): MonitoredDeviceState | null;
+
+  /**
+   * Return the current state snapshot for all paired monitored devices.
+   */
+  getMonitoredDeviceStates(): MonitoredDeviceState[];
+
+  /**
+   * Return the current API forwarding configuration.
+   * Each field is `null` if not set.
+   */
+  getApiEndpoint(): { url: string | null; apiKey: string | null; id: string | null };
 }
 
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

@@ -12,6 +12,7 @@ private let EXIT_DISTANCE_KEY = "expo.beacon.exit_distance"
 private let NOTIFICATION_CONFIG_KEY = "expo.beacon.notification_config"
 private let EVENT_LOGGING_ENABLED_KEY = "expo.beacon.event_logging_enabled"
 private let MIN_RSSI_KEY = "expo.beacon.min_rssi"
+private let EVENT_LEVEL_KEY = "expo.beacon.event_level"
 
 /// Default minimum RSSI (dBm) below which beacon readings are discarded as unreliable.
 private let DEFAULT_MIN_RSSI: Int = -85
@@ -34,6 +35,9 @@ private let EDDYSTONE_MONITORING_TICK_INTERVAL: TimeInterval = 2.0
 private let EDDYSTONE_RECENTLY_SEEN_THRESHOLD: TimeInterval = 15.0
 /// Minimum interval between consecutive distance event emissions per identifier.
 private let DISTANCE_EVENT_THROTTLE_INTERVAL: TimeInterval = 1.0
+/// Seconds of no valid BLE readings before starting the timeout countdown.
+/// Acts as a safety net when ranging cycles stop entirely (e.g. Doze mode).
+private let DISTANCE_INACTIVITY_SECONDS: TimeInterval = 60.0
 
 public class ExpoBeaconModule: Module {
 
@@ -98,6 +102,9 @@ public class ExpoBeaconModule: Module {
     /// Minimum RSSI threshold — readings below this are treated as unreliable.
     private var minRssiThreshold: Int = DEFAULT_MIN_RSSI
 
+    /// Event level: "all" emits distance + enter/exit/timeout; "events" suppresses distance.
+    private var eventLevel: String = "all"
+
     /// Distance smoothing (EMA) state per identifier.
     private var smoothedDistances: [String: Double] = [:]
     /// EMA weight for new readings. 0.4 balances responsiveness vs noise rejection.
@@ -116,12 +123,17 @@ public class ExpoBeaconModule: Module {
     private var eventLogger: BeaconEventLogger?
     private var loggingEnabled = false
 
+
+
     // Native API forwarder (fire-and-forget HTTP)
     private lazy var apiForwarder = BeaconApiForwarder(defaults: defaults)
 
     // Timeout timers — fire once after beacon stays in range for configured duration
     private var beaconTimeoutTimers: [String: DispatchWorkItem] = [:]
     private var eddystoneTimeoutTimers: [String: DispatchWorkItem] = [:]
+    // Inactivity timers — start timeout countdown when no BLE readings for 60 s
+    private var beaconInactivityTimers: [String: DispatchWorkItem] = [:]
+    private var eddystoneInactivityTimers: [String: DispatchWorkItem] = [:]
 
     // Custom UserDefaults suite to isolate beacon data from the host app's .standard
     private lazy var defaults: UserDefaults = {
@@ -135,17 +147,19 @@ public class ExpoBeaconModule: Module {
             self.migrateUserDefaultsIfNeeded()
         }
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError")
 
         // MARK: - Scan
 
         AsyncFunction("scanForBeaconsAsync") { (uuids: [String], scanDurationMs: Int, promise: Promise) in
             guard scanDurationMs > 0 else {
                 promise.reject("INVALID_DURATION", "Scan duration must be a positive integer")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_DURATION", "message": "Scan duration must be a positive integer"])
                 return
             }
             guard self.scanPromise == nil else {
                 promise.reject("SCAN_IN_PROGRESS", "A scan is already in progress")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "SCAN_IN_PROGRESS", "message": "A scan is already in progress"])
                 return
             }
 
@@ -171,6 +185,7 @@ public class ExpoBeaconModule: Module {
                     promise.reject("WILDCARD_NOT_SUPPORTED",
                         "iOS does not support wildcard iBeacon scanning. " +
                         "Provide at least one proximity UUID, or pair beacons first.")
+                    self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "WILDCARD_NOT_SUPPORTED", "message": "iOS does not support wildcard iBeacon scanning. Provide at least one proximity UUID, or pair beacons first."])
                     self.scanPromise = nil
                     return
                 }
@@ -178,6 +193,7 @@ public class ExpoBeaconModule: Module {
                 for uuidStr in uuids {
                     guard let uuid = UUID(uuidString: uuidStr) else {
                         promise.reject("INVALID_UUID", "Invalid UUID: \(uuidStr)")
+                        self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_UUID", "message": "Invalid UUID: \(uuidStr)"])
                         self.scanPromise = nil
                         return
                     }
@@ -191,6 +207,7 @@ public class ExpoBeaconModule: Module {
             self.requestLocationPermission { granted in
                 guard granted else {
                     promise.reject("PERMISSION_DENIED", "Location permission required for beacon scanning")
+                    self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "PERMISSION_DENIED", "message": "Location permission required for beacon scanning"])
                     self.scanPromise = nil
                     return
                 }
@@ -331,6 +348,13 @@ public class ExpoBeaconModule: Module {
                 maxDistance = map["maxDistance"] as? Double
                 exitDistance = map["exitDistance"] as? Double
                 minRssi = map["minRssi"] as? Int
+                if let lvl = map["level"] as? String, lvl == "events" || lvl == "all" {
+                    self.eventLevel = lvl
+                    self.defaults.set(lvl, forKey: EVENT_LEVEL_KEY)
+                } else {
+                    self.eventLevel = "all"
+                    self.defaults.set("all", forKey: EVENT_LEVEL_KEY)
+                }
                 if let notifications = map["notifications"] as? [String: Any],
                    let data = try? JSONSerialization.data(withJSONObject: notifications),
                    let json = String(data: data, encoding: .utf8) {
@@ -339,18 +363,22 @@ public class ExpoBeaconModule: Module {
             }
             if let dist = maxDistance, (!dist.isFinite || dist <= 0) {
                 promise.reject("INVALID_MAX_DISTANCE", "maxDistance must be a finite number greater than 0")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_MAX_DISTANCE", "message": "maxDistance must be a finite number greater than 0"])
                 return
             }
             if let exitDist = exitDistance, (!exitDist.isFinite || exitDist <= 0) {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance must be a finite number greater than 0")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_EXIT_DISTANCE", "message": "exitDistance must be a finite number greater than 0"])
                 return
             }
             if exitDistance != nil && maxDistance == nil {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance requires maxDistance to be set")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_EXIT_DISTANCE", "message": "exitDistance requires maxDistance to be set"])
                 return
             }
             if let dist = maxDistance, let exitDist = exitDistance, exitDist < dist {
                 promise.reject("INVALID_EXIT_DISTANCE", "exitDistance must be greater than or equal to maxDistance")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_EXIT_DISTANCE", "message": "exitDistance must be greater than or equal to maxDistance"])
                 return
             }
             if let dist = maxDistance {
@@ -374,6 +402,7 @@ public class ExpoBeaconModule: Module {
             self.requestLocationPermission { granted in
                 guard granted else {
                     promise.reject("PERMISSION_DENIED", "Location permission required for monitoring")
+                    self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "PERMISSION_DENIED", "message": "Location permission required for monitoring"])
                     return
                 }
                 // Request Always authorization non-blockingly for background support.
@@ -392,6 +421,8 @@ public class ExpoBeaconModule: Module {
             self.defaults.set(false, forKey: IS_MONITORING_KEY)
             self.defaults.removeObject(forKey: MAX_DISTANCE_KEY)
             self.defaults.removeObject(forKey: EXIT_DISTANCE_KEY)
+            self.defaults.removeObject(forKey: EVENT_LEVEL_KEY)
+            self.eventLevel = "all"
             self.stopRegionMonitoring()
             promise.resolve(nil)
         }
@@ -433,10 +464,12 @@ public class ExpoBeaconModule: Module {
         AsyncFunction("scanForEddystonesAsync") { (scanDurationMs: Int, promise: Promise) in
             guard scanDurationMs > 0 else {
                 promise.reject("INVALID_DURATION", "Scan duration must be a positive integer")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "INVALID_DURATION", "message": "Scan duration must be a positive integer"])
                 return
             }
             guard self.eddystoneScanPromise == nil else {
                 promise.reject("SCAN_IN_PROGRESS", "An Eddystone scan is already in progress")
+                self.sendLoggedEvent("onBeaconError", ["identifier": "", "code": "SCAN_IN_PROGRESS", "message": "An Eddystone scan is already in progress"])
                 return
             }
             self.eddystoneScanPromise = promise
@@ -484,8 +517,44 @@ public class ExpoBeaconModule: Module {
 
         // MARK: - API Forwarding
 
-        Function("setApiEndpoint") { (url: String, apiKey: String?) -> Void in
-            self.apiForwarder.configure(url: url, apiKey: apiKey)
+        Function("setApiEndpoint") { (url: String, apiKey: String?, id: String?) -> Void in
+            self.apiForwarder.configure(url: url, apiKey: apiKey, id: id)
+        }
+
+        Function("getApiEndpoint") { () -> [String: String?] in
+            return self.apiForwarder.getConfig()
+        }
+
+        Function("getMonitoringConfig") { () -> [String: Any?] in
+            var result: [String: Any?] = [
+                "isMonitoring": self.defaults.bool(forKey: IS_MONITORING_KEY)
+            ]
+            if let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double {
+                result["maxDistance"] = maxDist
+            }
+            if let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double {
+                result["exitDistance"] = exitDist
+            }
+            if let rssi = self.defaults.object(forKey: MIN_RSSI_KEY) as? Int {
+                result["minRssi"] = rssi
+            }
+            if let level = self.defaults.string(forKey: EVENT_LEVEL_KEY) {
+                result["level"] = level
+            }
+            if let json = self.defaults.string(forKey: NOTIFICATION_CONFIG_KEY),
+               let data = json.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                result["notifications"] = obj
+            }
+            return result
+        }
+
+        Function("getMonitoredDeviceState") { (identifier: String) -> [String: Any?]? in
+            return self.buildMonitoredDeviceState(identifier: identifier)
+        }
+
+        Function("getMonitoredDeviceStates") { () -> [[String: Any?]] in
+            return self.buildMonitoredDeviceStates()
         }
 
         // MARK: - Battery Optimization (Android-only; no-op on iOS)
@@ -575,6 +644,9 @@ public class ExpoBeaconModule: Module {
         let storedRssi = defaults.object(forKey: MIN_RSSI_KEY) as? Int
         minRssiThreshold = storedRssi ?? DEFAULT_MIN_RSSI
 
+        // Restore persisted event level (survives app restarts)
+        eventLevel = defaults.string(forKey: EVENT_LEVEL_KEY) ?? "all"
+
         let beacons = loadPairedBeaconsRaw()
 
         // CLLocationManager supports a maximum of 20 monitored regions.
@@ -582,6 +654,7 @@ public class ExpoBeaconModule: Module {
         let maxRegions = 20
         if beacons.count > maxRegions {
             print("[ExpoBeacon] Warning: \(beacons.count) paired beacons exceeds the iOS limit of \(maxRegions) monitored regions. Only the first \(maxRegions) will be monitored.")
+            sendLoggedEvent("onBeaconError", ["identifier": "", "code": "REGION_LIMIT_EXCEEDED", "message": "\(beacons.count) paired beacons exceeds the iOS limit of \(maxRegions) monitored regions. Only the first \(maxRegions) will be monitored."])
         }
 
         for b in beacons.prefix(maxRegions) {
@@ -641,6 +714,9 @@ public class ExpoBeaconModule: Module {
 
         for timer in beaconTimeoutTimers.values { timer.cancel() }
         beaconTimeoutTimers.removeAll()
+
+        for timer in beaconInactivityTimers.values { timer.cancel() }
+        beaconInactivityTimers.removeAll()
 
         stopEddystoneMonitoring()
     }
@@ -810,6 +886,8 @@ public class ExpoBeaconModule: Module {
 
             eddystoneLatestSeen[identifier] = Date()
             eddystoneMissCounters[identifier] = 0
+            // Valid BLE reading — reset inactivity timer.
+            rescheduleEddystoneInactivity(identifier: identifier, namespace: ns, instance: inst)
 
             // Distance-driven enter/exit with hysteresis — evaluated on every
             // BLE callback (not throttled) so the hysteresis counters advance
@@ -818,13 +896,10 @@ public class ExpoBeaconModule: Module {
             let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
             let hasValidDistance = distance.isFinite && distance >= 0
             if hasValidDistance || maxDist == nil {
-                // Apply EMA smoothing; jump guard returns nil for outliers
+                // Apply EMA smoothing; jump resets EMA to the new value
                 let effectiveDistance: Double
-                if hasValidDistance, let smoothed = smoothDistance(identifier: identifier, rawDistance: distance) {
-                    effectiveDistance = smoothed
-                } else if hasValidDistance {
-                    // Jump outlier — skip this cycle without resetting counters
-                    break
+                if hasValidDistance {
+                    effectiveDistance = smoothDistance(identifier: identifier, rawDistance: distance)!
                 } else {
                     effectiveDistance = distance
                 }
@@ -862,7 +937,8 @@ public class ExpoBeaconModule: Module {
                         "rssi": beaconRssi
                     ])
                     postBeaconNotification(identifier: identifier, eventType: "exit")
-                    // Beacon left — start the timeout clock.
+                    // Beacon left — cancel inactivity timer and start the timeout clock.
+                    cancelEddystoneInactivity(identifier: identifier)
                     scheduleEddystoneTimeout(identifier: identifier, namespace: ns, instance: inst)
                 case .none:
                     break
@@ -870,6 +946,7 @@ public class ExpoBeaconModule: Module {
             }
 
             guard hasValidDistance else { break }
+            guard self.eventLevel == "all" else { break }
 
             // Throttle distance events — enter/exit above is evaluated on every
             // callback, but distance events are rate-limited to avoid flooding JS.
@@ -961,11 +1038,51 @@ public class ExpoBeaconModule: Module {
             let identifier = params["identifier"] as? String
             getOrCreateEventLogger().logEvent(eventType: eventName, identifier: identifier, data: params)
         }
-        // Forward enter/exit/timeout events to remote API (skip distance — too frequent)
-        if !eventName.lowercased().contains("distance") {
-            apiForwarder.forwardEvent(params)
-        }
+        // Forward all produced events to remote API
+        apiForwarder.forwardEvent(params)
+        // Dispatch enter/exit to registered plugins (e.g. to start/stop BGLocation)
+        dispatchToLifecycleRegistry(eventName: eventName, params: params)
         sendEvent(eventName, params)
+    }
+
+    private func dispatchToLifecycleRegistry(eventName: String, params: [String: Any]) {
+        let r = BeaconLifecycleRegistry.shared
+        let identifier = params["identifier"] as? String ?? ""
+        let distance = params["distance"] as? Double ?? -1.0
+        switch eventName {
+        case "onBeaconEnter":
+            r.dispatchEnter(
+                identifier: identifier,
+                uuid: params["uuid"] as? String ?? "",
+                major: params["major"] as? Int ?? 0,
+                minor: params["minor"] as? Int ?? 0,
+                distance: distance
+            )
+        case "onBeaconExit":
+            r.dispatchExit(
+                identifier: identifier,
+                uuid: params["uuid"] as? String ?? "",
+                major: params["major"] as? Int ?? 0,
+                minor: params["minor"] as? Int ?? 0,
+                distance: distance
+            )
+        case "onEddystoneEnter":
+            r.dispatchEddystoneEnter(
+                identifier: identifier,
+                namespace: params["namespace"] as? String ?? "",
+                instance: params["instance"] as? String ?? "",
+                distance: distance
+            )
+        case "onEddystoneExit":
+            r.dispatchEddystoneExit(
+                identifier: identifier,
+                namespace: params["namespace"] as? String ?? "",
+                instance: params["instance"] as? String ?? "",
+                distance: distance
+            )
+        default:
+            break
+        }
     }
 
     private func getOrCreateEventLogger() -> BeaconEventLogger {
@@ -1003,6 +1120,63 @@ public class ExpoBeaconModule: Module {
         let value = self.defaults.array(forKey: PAIRED_EDDYSTONES_KEY) as? [[String: Any]] ?? []
         cachedPairedEddystones = value
         return value
+    }
+
+    private func buildMonitoredDeviceState(identifier: String) -> [String: Any?]? {
+        if let pairedBeacon = loadPairedBeaconsRaw().first(where: { ($0["identifier"] as? String) == identifier }) {
+            return makeMonitoredIBeaconState(from: pairedBeacon)
+        }
+        if let pairedEddystone = loadPairedEddystonesRaw().first(where: { ($0["identifier"] as? String) == identifier }) {
+            return makeMonitoredEddystoneState(from: pairedEddystone)
+        }
+        return nil
+    }
+
+    private func buildMonitoredDeviceStates() -> [[String: Any?]] {
+        let beaconStates = loadPairedBeaconsRaw().map { makeMonitoredIBeaconState(from: $0) }
+        let eddystoneStates = loadPairedEddystonesRaw().map { makeMonitoredEddystoneState(from: $0) }
+        return beaconStates + eddystoneStates
+    }
+
+    private func makeMonitoredIBeaconState(from paired: [String: Any]) -> [String: Any?] {
+        let identifier = paired["identifier"] as? String ?? ""
+        let isEntered = enteredRegions.contains(identifier)
+        let major = (paired["major"] as? Int) ?? (paired["major"] as? NSNumber)?.intValue ?? 0
+        let minor = (paired["minor"] as? Int) ?? (paired["minor"] as? NSNumber)?.intValue ?? 0
+
+        return [
+            "kind": "ibeacon",
+            "identifier": identifier,
+            "uuid": paired["uuid"] as? String ?? "",
+            "major": major,
+            "minor": minor,
+            "state": isEntered ? "entered" : "exited",
+            "distance": normalizedMonitoringDistance(identifier: identifier, isEntered: isEntered)
+        ]
+    }
+
+    private func makeMonitoredEddystoneState(from paired: [String: Any]) -> [String: Any?] {
+        let identifier = paired["identifier"] as? String ?? ""
+        let isEntered = eddystoneEnteredRegions.contains(identifier)
+
+        return [
+            "kind": "eddystone",
+            "identifier": identifier,
+            "namespace": paired["namespace"] as? String ?? "",
+            "instance": paired["instance"] as? String ?? "",
+            "state": isEntered ? "entered" : "exited",
+            "distance": normalizedMonitoringDistance(identifier: identifier, isEntered: isEntered)
+        ]
+    }
+
+    private func normalizedMonitoringDistance(identifier: String, isEntered: Bool) -> Double? {
+        guard isEntered,
+              let distance = smoothedDistances[identifier],
+              distance.isFinite,
+              distance >= 0 else {
+            return nil
+        }
+        return distance
     }
 
     private func migrateUserDefaultsIfNeeded() {
@@ -1050,6 +1224,9 @@ public class ExpoBeaconModule: Module {
         for timer in eddystoneTimeoutTimers.values { timer.cancel() }
         eddystoneTimeoutTimers.removeAll()
 
+        for timer in eddystoneInactivityTimers.values { timer.cancel() }
+        eddystoneInactivityTimers.removeAll()
+
         stopBleScanIfUnneeded()
     }
 
@@ -1096,7 +1273,8 @@ public class ExpoBeaconModule: Module {
                 sendLoggedEvent("onEddystoneExit", params)
                 print("[ExpoBeacon] DEBUG: Eddystone miss-based EXIT for \(identifier)")
                 postBeaconNotification(identifier: identifier, eventType: "exit")
-                // Beacon disappeared — start the timeout clock.
+                // Beacon disappeared — cancel inactivity timer and start the timeout clock.
+                cancelEddystoneInactivity(identifier: identifier)
                 scheduleEddystoneTimeout(identifier: identifier, namespace: ns, instance: inst)
             }
         }
@@ -1115,6 +1293,7 @@ public class ExpoBeaconModule: Module {
             guard let self = self else { return }
             self.beaconTimeoutTimers.removeValue(forKey: identifier)
             self.sendLoggedEvent("onBeaconTimeout", self.makeBeaconEventParams(identifier: identifier, beacon: beacon, region: region))
+            self.postBeaconNotification(identifier: identifier, eventType: "timeout")
         }
         beaconTimeoutTimers[identifier] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds), execute: work)
@@ -1140,6 +1319,7 @@ public class ExpoBeaconModule: Module {
                 "instance": instance,
                 "distance": -1
             ])
+            self.postBeaconNotification(identifier: identifier, eventType: "timeout")
         }
         eddystoneTimeoutTimers[identifier] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds), execute: work)
@@ -1149,6 +1329,48 @@ public class ExpoBeaconModule: Module {
         eddystoneTimeoutTimers.removeValue(forKey: identifier)?.cancel()
     }
 
+    // MARK: - Inactivity timer helpers (no BLE readings → start timeout countdown)
+
+    private func rescheduleBeaconInactivity(identifier: String, beacon: CLBeacon? = nil, region: CLBeaconRegion? = nil) {
+        cancelBeaconInactivity(identifier: identifier)
+
+        let paired = loadPairedBeaconsRaw().first { ($0["identifier"] as? String) == identifier }
+        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.beaconInactivityTimers.removeValue(forKey: identifier)
+            // No BLE readings for 60 s — start the configured timeout countdown.
+            self.scheduleBeaconTimeout(identifier: identifier, beacon: beacon, region: region)
+        }
+        beaconInactivityTimers[identifier] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + DISTANCE_INACTIVITY_SECONDS, execute: work)
+    }
+
+    private func rescheduleEddystoneInactivity(identifier: String, namespace: String, instance: String) {
+        cancelEddystoneInactivity(identifier: identifier)
+
+        let paired = loadPairedEddystonesRaw().first { ($0["identifier"] as? String) == identifier }
+        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self.eddystoneInactivityTimers.removeValue(forKey: identifier)
+            // No BLE readings for 60 s — start the configured timeout countdown.
+            self.scheduleEddystoneTimeout(identifier: identifier, namespace: namespace, instance: instance)
+        }
+        eddystoneInactivityTimers[identifier] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + DISTANCE_INACTIVITY_SECONDS, execute: work)
+    }
+
+    private func cancelBeaconInactivity(identifier: String) {
+        beaconInactivityTimers.removeValue(forKey: identifier)?.cancel()
+    }
+
+    private func cancelEddystoneInactivity(identifier: String) {
+        eddystoneInactivityTimers.removeValue(forKey: identifier)?.cancel()
+    }
+
     private func postBeaconNotification(identifier: String, eventType: String) {
         let cfg = loadNotificationConfig()
         let eventsCfg = cfg["beaconEvents"] as? [String: Any]
@@ -1156,11 +1378,19 @@ public class ExpoBeaconModule: Module {
         // Respect the enabled flag (defaults to true)
         if let enabled = eventsCfg?["enabled"] as? Bool, !enabled { return }
 
-        let defaultTitle = eventType == "enter" ? "Beacon Entered" : "Beacon Exited"
+        let defaultTitle: String
+        switch eventType {
+        case "enter": defaultTitle = "Beacon Entered"
+        case "timeout": defaultTitle = "Beacon Timeout"
+        default: defaultTitle = "Beacon Exited"
+        }
         let title: String
-        if eventType == "enter" {
+        switch eventType {
+        case "enter":
             title = (eventsCfg?["enterTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
-        } else {
+        case "timeout":
+            title = (eventsCfg?["timeoutTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
+        default:
             title = (eventsCfg?["exitTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
         }
 
@@ -1190,6 +1420,7 @@ public class ExpoBeaconModule: Module {
               let data = json.data(using: .utf8) else { return [:] }
         guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             print("[ExpoBeacon] Warning: failed to parse notification config JSON")
+            sendLoggedEvent("onBeaconError", ["identifier": "", "code": "CONFIG_PARSE_ERROR", "message": "Failed to parse notification config JSON"])
             return [:]
         }
         return dict
@@ -1330,9 +1561,13 @@ public class ExpoBeaconModule: Module {
             if let beacon = validBeacon {
                 // Got a valid reading — reset miss counter
                 missCounters[identifier] = 0
+                // Valid BLE reading — reset inactivity timer.
+                rescheduleBeaconInactivity(identifier: identifier, beacon: beacon)
 
-                // Emit distance event every ranging cycle (~1 s)
-                sendLoggedEvent("onBeaconDistance", makeBeaconEventParams(identifier: identifier, beacon: beacon))
+                // Emit distance event every ranging cycle (~1 s) if level allows
+                if self.eventLevel == "all" {
+                    sendLoggedEvent("onBeaconDistance", makeBeaconEventParams(identifier: identifier, beacon: beacon))
+                }
 
                 // Enter/exit synthesis with hysteresis — always applied.
                 // When maxDistance is set, distance thresholds control transitions.
@@ -1341,11 +1576,8 @@ public class ExpoBeaconModule: Module {
                 let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
                 let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
 
-                // Apply EMA smoothing; jump guard returns nil for outliers
-                guard let smoothed = smoothDistance(identifier: identifier, rawDistance: beacon.accuracy) else {
-                    // Jump outlier — skip this cycle without resetting counters
-                    return
-                }
+                // Apply EMA smoothing; jump resets EMA to the new value
+                let smoothed = smoothDistance(identifier: identifier, rawDistance: beacon.accuracy)!
 
                 let action = evaluateDistanceHysteresis(
                     identifier: identifier,
@@ -1366,7 +1598,8 @@ public class ExpoBeaconModule: Module {
                     smoothedDistances.removeValue(forKey: identifier)
                     sendLoggedEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, beacon: beacon, event: "exit"))
                     postBeaconNotification(identifier: identifier, eventType: "exit")
-                    // Beacon left — start the timeout clock.
+                    // Beacon left — cancel inactivity timer and start the timeout clock.
+                    cancelBeaconInactivity(identifier: identifier)
                     scheduleBeaconTimeout(identifier: identifier, beacon: beacon)
                 case .none:
                     break
@@ -1394,7 +1627,8 @@ public class ExpoBeaconModule: Module {
                     let region = monitoredRegions.first { $0.identifier == identifier }
                     sendLoggedEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: region, event: "exit"))
                     postBeaconNotification(identifier: identifier, eventType: "exit")
-                    // Beacon disappeared — start the timeout clock.
+                    // Beacon disappeared — cancel inactivity timer and start the timeout clock.
+                    cancelBeaconInactivity(identifier: identifier)
                     scheduleBeaconTimeout(identifier: identifier, region: region)
                 }
             }
@@ -1440,7 +1674,8 @@ public class ExpoBeaconModule: Module {
         if wasEntered {
             sendLoggedEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "exit"))
             postBeaconNotification(identifier: identifier, eventType: "exit")
-            // OS-level exit safety net — start the timeout clock.
+            // OS-level exit safety net — cancel inactivity timer and start the timeout clock.
+            cancelBeaconInactivity(identifier: identifier)
             scheduleBeaconTimeout(identifier: identifier, region: beaconRegion)
         }
     }
@@ -1449,10 +1684,20 @@ public class ExpoBeaconModule: Module {
         let id = region?.identifier ?? "unknown"
         Logger(subsystem: "expo.modules.beacon", category: "monitoring")
             .error("Monitoring failed for region \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        sendLoggedEvent("onBeaconError", [
+            "identifier": id,
+            "code": "MONITORING_FAILED",
+            "message": error.localizedDescription
+        ])
     }
 
     fileprivate func handleDidFailRanging(for constraint: CLBeaconIdentityConstraint, error: Error) {
         print("[ExpoBeacon] Ranging failed for constraint \(constraint.uuid): \(error.localizedDescription)")
+        sendLoggedEvent("onBeaconError", [
+            "identifier": constraint.uuid.uuidString,
+            "code": "RANGING_FAILED",
+            "message": error.localizedDescription
+        ])
 
         // If a one-shot scan is active and this constraint belongs to it, reject the promise
         if scanPromise != nil && scanConstraints.contains(where: { $0 == constraint }) {
@@ -1465,6 +1710,14 @@ public class ExpoBeaconModule: Module {
             scanPromise?.reject("RANGING_FAILED", "Beacon ranging failed: \(error.localizedDescription)")
             scanPromise = nil
         }
+    }
+
+    fileprivate func handleBluetoothStateError(code: String, message: String) {
+        sendLoggedEvent("onBeaconError", [
+            "identifier": "",
+            "code": code,
+            "message": message
+        ])
     }
 }
 
@@ -1518,10 +1771,12 @@ private class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
         case .unauthorized:
             print("[ExpoBeacon] Bluetooth authorization denied — Eddystone scanning/monitoring unavailable. " +
                   "Ensure NSBluetoothAlwaysUsageDescription is set in Info.plist.")
+            module?.handleBluetoothStateError(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth authorization denied — Eddystone scanning/monitoring unavailable")
             module?.eddystoneScanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
             module?.eddystoneScanPromise = nil
         case .poweredOff:
             print("[ExpoBeacon] Bluetooth is powered off — Eddystone scanning/monitoring unavailable.")
+            module?.handleBluetoothStateError(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off — Eddystone scanning/monitoring unavailable")
             module?.eddystoneScanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
             module?.eddystoneScanPromise = nil
         default:

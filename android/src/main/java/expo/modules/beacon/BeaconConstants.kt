@@ -26,8 +26,21 @@ internal const val MONITORING_SCAN_PERIOD_MS = 1100L
  */
 internal const val MONITORING_BETWEEN_SCAN_PERIOD_MS = 1000L
 
-/** Ignore monitor-based exits if ranging saw the beacon within this window. */
-internal const val RECENT_RANGING_SIGHTING_GRACE_MS = 25000L
+/**
+ * AltBeacon region exit period — how long after the last sighting before
+ * MonitorNotifier.didExitRegion fires. Set generously to avoid premature
+ * monitor-level exits that bypass ranging hysteresis.
+ */
+internal const val REGION_EXIT_PERIOD_MS = 60000L
+
+/**
+ * Grace window after the last ranging sighting during which MonitorNotifier.didExitRegion
+ * is suppressed. Matched to REGION_EXIT_PERIOD_MS so that a monitor-level exit is only
+ * honoured when ranging has *also* been silent for the full exit period — preventing
+ * false exits caused by Android 17+'s intermittent BLE scan gaps where ranging may
+ * be briefly quiet even though the beacon is still within range.
+ */
+internal const val RECENT_RANGING_SIGHTING_GRACE_MS = REGION_EXIT_PERIOD_MS
 
 /**
  * Number of consecutive ranging misses before emitting a distance-based exit event.
@@ -37,15 +50,14 @@ internal const val RECENT_RANGING_SIGHTING_GRACE_MS = 25000L
  */
 internal const val EXIT_MISS_THRESHOLD = 10
 
+/**
+ * Milliseconds of no valid BLE readings before starting the timeout countdown.
+ * Acts as a safety net when ranging cycles stop entirely (e.g. Doze mode).
+ */
+internal const val DISTANCE_INACTIVITY_MS = 60_000L
+
 /** Number of consecutive readings required to confirm a distance-based enter or exit transition. */
 internal const val HYSTERESIS_COUNT = 3
-
-/**
- * AltBeacon region exit period — how long after the last sighting before
- * MonitorNotifier.didExitRegion fires. Set generously to avoid premature
- * monitor-level exits that bypass ranging hysteresis.
- */
-internal const val REGION_EXIT_PERIOD_MS = 60000L
 
 /** Default minimum RSSI (dBm) below which beacon readings are discarded as unreliable. */
 internal const val DEFAULT_MIN_RSSI = -85

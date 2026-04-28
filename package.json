@@ -1,6 +1,6 @@
 {
   "name": "expo-beacon",
-  "version": "0.6.13",
+  "version": "0.7.9",
   "description": "Expo module for scanning, pairing, and monitoring iBeacons on Android and iOS",
   "main": "build/index.js",
   "types": "build/index.d.ts",
@@ -13,6 +13,8 @@
   },
   "files": [
     "build/",
+    "plugin/build/",
+    "app.plugin.js",
     "ios/",
     "android/src/",
     "android/build.gradle",
@@ -21,11 +23,12 @@
   ],
   "scripts": {
     "build": "expo-module build",
+    "build:plugin": "tsc -p plugin/tsconfig.json",
     "clean": "expo-module clean",
     "lint": "expo-module lint",
     "test": "expo-module test",
-    "prepare": "expo-module prepare",
-    "prepublishOnly": "expo-module prepublishOnly",
+    "prepare": "expo-module prepare && npm run build:plugin",
+    "prepublishOnly": "expo-module prepublishOnly && npm run build:plugin",
     "expo-module": "expo-module",
     "open:ios": "xed example/ios",
     "open:android": "open -a \"Android Studio\" example/android"
@@ -60,6 +63,7 @@
     "react-native": "0.83.2"
   },
   "peerDependencies": {
+    "@expo/config-plugins": "*",
     "expo": ">=51.0.0",
     "react": "*",
     "react-native": "*"
