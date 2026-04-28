@@ -1,6 +1,6 @@
 {
   "name": "expo-beacon",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Expo module for scanning, pairing, and monitoring iBeacons on Android and iOS",
   "main": "build/index.js",
   "types": "build/index.d.ts",
