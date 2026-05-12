@@ -14,6 +14,8 @@ export type {
   MonitoringConfig,
   MonitoredDeviceState,
   BeaconNotificationConfig,
+  CarPlayNotificationConfig,
+  CarPlayChannelConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
   EddystoneFrameType,

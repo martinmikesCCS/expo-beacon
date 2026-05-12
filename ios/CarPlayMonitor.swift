@@ -20,6 +20,16 @@ final class CarPlayMonitor {
     private let log = OSLog(subsystem: "expo.modules.beacon", category: "CarPlayMonitor")
     private let queue = DispatchQueue.main
 
+    /// Cached ISO8601 formatter (UTC, fractional seconds). Reused across emits
+    /// to avoid per-event allocation. `ISO8601DateFormatter` is documented as
+    /// thread-safe.
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        f.timeZone = TimeZone(identifier: "UTC")
+        return f
+    }()
+
     private var observer: NSObjectProtocol?
     private var emit: Emit?
     private var isConnected: Bool = false
@@ -170,16 +180,20 @@ final class CarPlayMonitor {
     }
 
     private func emitConnected(transport: String) {
+        let now = Date()
         let payload: [String: Any] = [
             "transport": transport,
-            "timestamp": Date().timeIntervalSince1970 * 1000.0,
+            "timestamp": now.timeIntervalSince1970 * 1000.0,
+            "timestampIso": Self.isoFormatter.string(from: now),
         ]
         emit?("onCarPlayConnected", payload)
     }
 
     private func emitDisconnected() {
+        let now = Date()
         let payload: [String: Any] = [
-            "timestamp": Date().timeIntervalSince1970 * 1000.0,
+            "timestamp": now.timeIntervalSince1970 * 1000.0,
+            "timestampIso": Self.isoFormatter.string(from: now),
         ]
         emit?("onCarPlayDisconnected", payload)
     }

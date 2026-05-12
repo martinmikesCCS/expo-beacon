@@ -19,6 +19,7 @@ import org.altbeacon.beacon.*
 import org.json.JSONArray
 
 private const val CHANNEL_ID = "expo_beacon_channel"
+private const val CARPLAY_CHANNEL_ID = "expo_beacon_carplay_channel"
 internal const val FOREGROUND_NOTIF_ID = 1001
 /**
  * Base ID for per-beacon enter/exit notifications; incremented per unique region.
@@ -26,6 +27,14 @@ internal const val FOREGROUND_NOTIF_ID = 1001
  * before ID collision. Sufficient for real-world beacon deployments.
  */
 private const val ENTER_EXIT_NOTIF_BASE_ID = 2000
+/**
+ * Fixed notification IDs for CarPlay connect / disconnect events. Each event
+ * type uses a single ID so repeated events of the same type replace the prior
+ * notification rather than stacking, while connect and disconnect remain
+ * independently visible.
+ */
+private const val CARPLAY_CONNECTED_NOTIF_ID = 3000
+private const val CARPLAY_DISCONNECTED_NOTIF_ID = 3001
 
 class BeaconForegroundService : Service(), BeaconConsumer {
 
@@ -94,6 +103,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         super.onCreate()
         activeService = this
         createNotificationChannel()
+        createCarPlayNotificationChannel()
         apiForwarder = BeaconApiForwarder(this)
         beaconManager = BeaconManager.getInstanceForApplication(this).also { manager ->
             BeaconParsers.ensureRegistered(manager)
@@ -856,6 +866,60 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         }
         // Best-effort delivery to the live JS bridge if a module instance is bound.
         try { boundModule?.get()?.forwardCarPlayEventFromService(eventName, payload) } catch (_: Throwable) {}
+        // Local notification for connect/disconnect (config-gated).
+        try {
+            when (eventName) {
+                "onCarPlayConnected" -> showCarPlayNotification(
+                    "connected",
+                    payload["transport"] as? String,
+                )
+                "onCarPlayDisconnected" -> showCarPlayNotification("disconnected", null)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "CarPlay notification post failed", e)
+        }
+    }
+
+    private fun showCarPlayNotification(eventType: String, transport: String?) {
+        val config = readNotificationConfig()
+        val eventsConfig = config.optJSONObject("carPlayEvents")
+
+        // Respect the enabled flag (defaults to true)
+        if (eventsConfig != null && !eventsConfig.optBoolean("enabled", true)) return
+
+        val defaultTitle = if (eventType == "connected") "CarPlay Connected" else "CarPlay Disconnected"
+        val title = when (eventType) {
+            "connected" -> eventsConfig?.optString("connectedTitle")?.takeIf { it.isNotEmpty() } ?: defaultTitle
+            else -> eventsConfig?.optString("disconnectedTitle")?.takeIf { it.isNotEmpty() } ?: defaultTitle
+        }
+
+        val bodyTemplate = eventsConfig?.optString("body")?.takeIf { it.isNotEmpty() }
+            ?: "CarPlay session {event}"
+        val message = bodyTemplate
+            .replace("{event}", eventType)
+            .replace("{transport}", transport ?: "")
+
+        val iconName = eventsConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
+        val iconResId = iconName?.let { name ->
+            try { resources.getIdentifier(name, "drawable", packageName).takeIf { it != 0 } }
+            catch (_: Exception) { null }
+        } ?: android.R.drawable.ic_dialog_info
+
+        val notification = NotificationCompat.Builder(this, CARPLAY_CHANNEL_ID)
+            .setSmallIcon(iconResId)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+        val notifId = if (eventType == "connected") CARPLAY_CONNECTED_NOTIF_ID
+                      else CARPLAY_DISCONNECTED_NOTIF_ID
+        try {
+            NotificationManagerCompat.from(this).notify(notifId, notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS not granted — silently skip notification
+        }
     }
 
     private fun createNotificationChannel() {
@@ -877,6 +941,31 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             // Only create channel if it doesn't exist yet — preserves user notification preferences
             if (notifMgr?.getNotificationChannel(CHANNEL_ID) == null) {
                 val channel = NotificationChannel(CHANNEL_ID, channelName, importance).apply {
+                    description = channelDesc
+                }
+                notifMgr?.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun createCarPlayNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val config = readNotificationConfig()
+            val channelConfig = config.optJSONObject("carPlayChannel")
+
+            val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
+                ?: "CarPlay / Android Auto"
+            val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
+                ?: "CarPlay and Android Auto connect/disconnect notifications"
+            val importance = when (channelConfig?.optString("importance")) {
+                "high" -> NotificationManager.IMPORTANCE_HIGH
+                "low" -> NotificationManager.IMPORTANCE_LOW
+                else -> NotificationManager.IMPORTANCE_DEFAULT
+            }
+
+            val notifMgr = getSystemService(NotificationManager::class.java)
+            if (notifMgr?.getNotificationChannel(CARPLAY_CHANNEL_ID) == null) {
+                val channel = NotificationChannel(CARPLAY_CHANNEL_ID, channelName, importance).apply {
                     description = channelDesc
                 }
                 notifMgr?.createNotificationChannel(channel)
@@ -926,6 +1015,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             context.getSharedPreferences(PREF_IS_MONITORING, Context.MODE_PRIVATE)
                 .edit().putBoolean("active", true).apply()
             ensureNotificationChannel(context)
+            ensureCarPlayNotificationChannel(context)
             val intent = Intent(context, BeaconForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -976,6 +1066,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         fun enableCarPlay(context: Context) {
             setCarPlayEnabled(context, true)
             ensureNotificationChannel(context)
+            ensureCarPlayNotificationChannel(context)
             val intent = Intent(context, BeaconForegroundService::class.java)
                 .setAction(ACTION_ENABLE_CARPLAY)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1043,6 +1134,38 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 val notifMgr = context.getSystemService(NotificationManager::class.java)
                 if (notifMgr?.getNotificationChannel(CHANNEL_ID) == null) {
                     val channel = NotificationChannel(CHANNEL_ID, channelName, importance).apply {
+                        description = channelDesc
+                    }
+                    notifMgr?.createNotificationChannel(channel)
+                }
+            }
+        }
+
+        /**
+         * Ensure the CarPlay notification channel exists. Mirrors
+         * [ensureNotificationChannel] for the dedicated CarPlay channel so that
+         * users can mute CarPlay notifications independently in system settings.
+         */
+        fun ensureCarPlayNotificationChannel(context: Context) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val json = context.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
+                    .getString("config", null)
+                val config = try { org.json.JSONObject(json ?: "") } catch (_: Exception) { org.json.JSONObject() }
+                val channelConfig = config.optJSONObject("carPlayChannel")
+
+                val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
+                    ?: "CarPlay / Android Auto"
+                val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
+                    ?: "CarPlay and Android Auto connect/disconnect notifications"
+                val importance = when (channelConfig?.optString("importance")) {
+                    "high" -> NotificationManager.IMPORTANCE_HIGH
+                    "low" -> NotificationManager.IMPORTANCE_LOW
+                    else -> NotificationManager.IMPORTANCE_DEFAULT
+                }
+
+                val notifMgr = context.getSystemService(NotificationManager::class.java)
+                if (notifMgr?.getNotificationChannel(CARPLAY_CHANNEL_ID) == null) {
+                    val channel = NotificationChannel(CARPLAY_CHANNEL_ID, channelName, importance).apply {
                         description = channelDesc
                     }
                     notifMgr?.createNotificationChannel(channel)

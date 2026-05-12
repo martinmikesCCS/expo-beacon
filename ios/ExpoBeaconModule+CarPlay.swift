@@ -7,7 +7,19 @@ extension ExpoBeaconModule {
     /// (see `CarPlayMonitor.start(emit:)` semantics).
     func startCarPlayMonitoringInternal() {
         CarPlayMonitor.shared.start { [weak self] eventName, payload in
-            self?.sendLoggedEvent(eventName, payload)
+            guard let self = self else { return }
+            self.sendLoggedEvent(eventName, payload)
+            switch eventName {
+            case "onCarPlayConnected":
+                self.postCarPlayNotification(
+                    eventType: "connected",
+                    transport: payload["transport"] as? String
+                )
+            case "onCarPlayDisconnected":
+                self.postCarPlayNotification(eventType: "disconnected", transport: nil)
+            default:
+                break
+            }
         }
         // Tier 2 fallback: subscribe to background-wake signals so suspended
         // apps still notice CarPlay route changes that happened off-process.

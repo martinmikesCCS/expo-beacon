@@ -7,6 +7,10 @@ import android.util.Log
 import androidx.car.app.connection.CarConnection
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.Observer
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Wraps [CarConnection] LiveData to surface Android Auto / Automotive OS
@@ -72,6 +76,8 @@ internal class CarPlayMonitor(private val context: Context) {
         if (lastConnected == connected) return
         lastConnected = connected
         val callback = emit ?: return
+        val now = System.currentTimeMillis()
+        val nowIso = formatIso(now)
         if (connected) {
             val transport = when (type) {
                 CarConnection.CONNECTION_TYPE_PROJECTION -> "projection"
@@ -80,12 +86,21 @@ internal class CarPlayMonitor(private val context: Context) {
             }
             callback("onCarPlayConnected", mapOf(
                 "transport" to transport,
-                "timestamp" to System.currentTimeMillis(),
+                "timestamp" to now,
+                "timestampIso" to nowIso,
             ))
         } else {
             callback("onCarPlayDisconnected", mapOf(
-                "timestamp" to System.currentTimeMillis(),
+                "timestamp" to now,
+                "timestampIso" to nowIso,
             ))
+        }
+    }
+
+    private fun formatIso(millis: Long): String {
+        // SimpleDateFormat is not thread-safe — synchronize on the shared instance.
+        synchronized(ISO_FORMAT) {
+            return ISO_FORMAT.format(Date(millis))
         }
     }
 
@@ -99,5 +114,9 @@ internal class CarPlayMonitor(private val context: Context) {
 
     private companion object {
         const val TAG = "CarPlayMonitor"
+        // ISO 8601 UTC with millisecond precision. Safe for all supported APIs (minSdk 23).
+        private val ISO_FORMAT = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }
     }
 }

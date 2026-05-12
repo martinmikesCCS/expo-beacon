@@ -112,14 +112,52 @@ export type NotificationChannelConfig = {
   importance?: "low" | "default" | "high";
 };
 
+/** Configuration for CarPlay / Android Auto connect/disconnect notifications. */
+export type CarPlayNotificationConfig = {
+  /** Whether to show CarPlay connect/disconnect notifications. Default: true. */
+  enabled?: boolean;
+  /** Notification title on CarPlay/Android Auto connect. Default: "CarPlay Connected". */
+  connectedTitle?: string;
+  /** Notification title on CarPlay/Android Auto disconnect. Default: "CarPlay Disconnected". */
+  disconnectedTitle?: string;
+  /**
+   * Notification body template. Supports `{event}` ("connected"/"disconnected") and
+   * `{transport}` (e.g. "wired", "wireless", "projection", "native", "unknown") placeholders.
+   * Note: `{transport}` is only meaningful for connect events; on disconnect it is replaced with an empty string.
+   * Default: "CarPlay session {event}".
+   */
+  body?: string;
+  /** Play a sound with the notification (iOS only). Default: true. */
+  sound?: boolean;
+  /** Android drawable resource name for the notification icon (e.g. "ic_notification"). */
+  icon?: string;
+};
+
+/** Configuration for the Android notification channel used for CarPlay events. */
+export type CarPlayChannelConfig = {
+  /** Channel display name shown in system settings. Default: "CarPlay / Android Auto". */
+  name?: string;
+  /** Channel description shown in system settings. Default: "CarPlay and Android Auto connect/disconnect notifications". */
+  description?: string;
+  /**
+   * Channel importance level. Default: 'default' (so connect/disconnect events make a sound).
+   * Note: Android may ignore decreases in importance after first channel creation until the app is reinstalled.
+   */
+  importance?: "low" | "default" | "high";
+};
+
 /** Combined notification configuration for all notification types. */
 export type NotificationConfig = {
   /** Settings for beacon enter/exit event notifications. */
   beaconEvents?: BeaconNotificationConfig;
+  /** Settings for CarPlay / Android Auto connect/disconnect notifications. */
+  carPlayEvents?: CarPlayNotificationConfig;
   /** Settings for the persistent foreground service notification (Android only). */
   foregroundService?: ForegroundServiceConfig;
   /** Settings for the Android notification channel (Android only). */
   channel?: NotificationChannelConfig;
+  /** Settings for the Android notification channel used for CarPlay events (Android only). */
+  carPlayChannel?: CarPlayChannelConfig;
 };
 
 /** Snapshot of the current monitoring configuration and active state. */
@@ -287,12 +325,16 @@ export type CarPlayConnectedEvent = {
   transport: CarPlayTransport;
   /** Timestamp in milliseconds since epoch. */
   timestamp: number;
+  /** ISO 8601 UTC representation of {@link timestamp} (e.g. "2026-05-12T14:23:45.678Z"). */
+  timestampIso?: string;
 };
 
 /** Payload fired when the device disconnects from a CarPlay or Android Auto session. */
 export type CarPlayDisconnectedEvent = {
   /** Timestamp in milliseconds since epoch. */
   timestamp: number;
+  /** ISO 8601 UTC representation of {@link timestamp} (e.g. "2026-05-12T14:23:45.678Z"). */
+  timestampIso?: string;
 };
 
 /** Payload for native beacon error events (monitoring/ranging failures). */
