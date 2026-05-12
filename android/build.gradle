@@ -20,4 +20,7 @@ android {
 
 dependencies {
   implementation 'org.altbeacon:android-beacon-library:2.21.2'
+  // androidx.car.app provides CarConnection LiveData for detecting Android Auto sessions.
+  // No Android Auto certification or extra permissions required for read-only state.
+  implementation 'androidx.car.app:app:1.4.0'
 }

@@ -1,128 +1,265 @@
 import {
   ConfigPlugin,
-  withAppDelegate,
+  withDangerousMod,
+  withEntitlementsPlist,
+  withInfoPlist,
   withXcodeProject,
 } from '@expo/config-plugins';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// ─── Plugin options ───────────────────────────────────────────────────────────
+
+export type BeaconIOSPluginProps = {
+  /**
+   * Enable the CarPlay "Driving Task" entitlement integration.
+   *
+   * When `true` the plugin will:
+   *   1. Add `com.apple.developer.carplay-driving-task` to the app's
+   *      `*.entitlements` file.
+   *   2. Inject a CarPlay scene configuration into `Info.plist`'s
+   *      `UIApplicationSceneManifest`, pointing at
+   *      `ExpoBeacon.BeaconCarPlaySceneDelegate` (shipped by this library).
+   *
+   * Requires the consumer app to have been granted the entitlement by Apple
+   * (request at https://developer.apple.com/contact/carplay/) and a
+   * matching provisioning profile. Without those, the build will fail to
+   * sign. Default: `false`.
+   */
+  carplayDrivingTask?: boolean;
+};
+
 // ─── Generated Swift file ─────────────────────────────────────────────────────
 
-export const IOS_PLUGIN_SWIFT = `\
+export function getIOSPluginSwift(): string {
+  return `\
 import ExpoBeacon
 import TSLocationManager
 
 final class BeaconGeoPlugin: BeaconLifecycleDelegate {
     func beaconDidEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
-        TSLocationManager.sharedManager().start()
+        BackgroundGeolocation.sharedInstance().start()
     }
     func beaconDidExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
-        TSLocationManager.sharedManager().stop()
+        BackgroundGeolocation.sharedInstance().stop()
+    }
+    func beaconDidTimeout(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+        BackgroundGeolocation.sharedInstance().stop()
     }
     func eddystoneDidEnter(identifier: String, namespace: String, instance: String, distance: Double) {
-        TSLocationManager.sharedManager().start()
+        BackgroundGeolocation.sharedInstance().start()
     }
     func eddystoneDidExit(identifier: String, namespace: String, instance: String, distance: Double) {
-        TSLocationManager.sharedManager().stop()
+        BackgroundGeolocation.sharedInstance().stop()
+    }
+    func eddystoneDidTimeout(identifier: String, namespace: String, instance: String, distance: Double) {
+        BackgroundGeolocation.sharedInstance().stop()
+    }
+    // Start tracking when the device connects to CarPlay (wired or wireless),
+    // stop when it disconnects.
+    func carPlayDidConnect(transport: String) {
+        BackgroundGeolocation.sharedInstance().start()
+    }
+    func carPlayDidDisconnect() {
+        BackgroundGeolocation.sharedInstance().stop()
     }
 }
 `;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Finds the UUID (key) of a PBXGroup by name, handling both quoted and unquoted
- * name values produced by node-xcode's parser.
- */
-function findPBXGroupKeyByName(xcodeProject: any, name: string): string | null {
-  const pbxGroups: Record<string, any> =
-    xcodeProject.hash.project.objects['PBXGroup'] ?? {};
-  for (const key of Object.keys(pbxGroups)) {
-    if (key.endsWith('_comment')) continue;
-    const group = pbxGroups[key];
-    if (group.name === `"${name}"` || group.name === name) return key;
-  }
-  return null;
-}
+function modifyAppDelegateSwift(contents: string): string {
+  const importLine = 'import ExpoBeacon';
 
-/** Returns true if a PBXFileReference for filename already exists (idempotency guard). */
-function isFileInXcodeProject(xcodeProject: any, filename: string): boolean {
-  const refs: Record<string, any> =
-    xcodeProject.hash.project.objects['PBXFileReference'] ?? {};
-  return Object.values(refs).some(
-    (f) =>
-      typeof f === 'object' &&
-      f !== null &&
-      (f.path === `"${filename}"` || f.path === filename),
-  );
-}
-
-function modifySwiftAppDelegate(contents: string): string {
-  // Insert `import ExpoBeacon` after the last existing import line.
-  if (!contents.includes('import ExpoBeacon')) {
+  // 1. Add import after the last existing import line.
+  if (!contents.includes(importLine)) {
     const lines = contents.split('\n');
     const lastImportIdx = lines.reduce(
       (last, line, i) => (line.trimStart().startsWith('import ') ? i : last),
       -1,
     );
     if (lastImportIdx >= 0) {
-      lines.splice(lastImportIdx + 1, 0, 'import ExpoBeacon');
-      contents = lines.join('\n');
+      lines.splice(lastImportIdx + 1, 0, importLine);
+    } else {
+      lines.splice(0, 0, importLine, '');
     }
+    contents = lines.join('\n');
   }
 
-  // Insert `BeaconLifecycleRegistry.register(BeaconGeoPlugin())` immediately
-  // before `return super.application(`, preserving indentation.
-  const marker = 'BeaconLifecycleRegistry.register(BeaconGeoPlugin())';
-  if (!contents.includes(marker)) {
+  // 2. Insert registration call before `return super.application(…didFinishLaunchingWithOptions…)`.
+  const registrationCall = 'BeaconLifecycleRegistry.register(BeaconGeoPlugin())';
+  if (contents.includes(registrationCall)) {
+    return contents; // already patched
+  }
+
+  if (/return super\.application\(application,\s*didFinishLaunching/.test(contents)) {
     contents = contents.replace(
-      /([ \t]*)(return super\.application\()/,
-      `$1${marker}\n$1$2`,
+      /([ \t]*)(return super\.application\(application,\s*didFinishLaunchingWithOptions[^)]*\))/,
+      `$1${registrationCall}\n$1$2`,
     );
+    return contents;
+  }
+
+  // Fallback: no `didFinishLaunchingWithOptions` override found — inject one before
+  // the last closing brace of the class so it is always picked up by the compiler.
+  const methodOverride = `
+  override func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+    ${registrationCall}
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+`;
+  const lastBraceIdx = contents.lastIndexOf('}');
+  if (lastBraceIdx >= 0) {
+    contents = contents.slice(0, lastBraceIdx) + methodOverride + contents.slice(lastBraceIdx);
   }
 
   return contents;
 }
 
+/** Return the first subdirectory of `platformRoot` that contains AppDelegate.swift. */
+function findAppDir(
+  platformRoot: string,
+): { appDir: string; appDelegatePath: string } | null {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(platformRoot);
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const dirPath = path.join(platformRoot, entry);
+    try {
+      if (!fs.statSync(dirPath).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const swiftPath = path.join(dirPath, 'AppDelegate.swift');
+    if (fs.existsSync(swiftPath)) {
+      return { appDir: entry, appDelegatePath: swiftPath };
+    }
+  }
+  return null;
+}
+
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
-const withBeaconIOS: ConfigPlugin = (config) => {
-  // Step 1 – write BeaconGeoPlugin.swift and add it to the Xcode project.
+const withBeaconIOS: ConfigPlugin<BeaconIOSPluginProps | void> = (config, props) => {
+  const opts: BeaconIOSPluginProps = props ?? {};
+
+  // Step 1 – write BeaconGeoPlugin.swift into the iOS app directory.
+  config = withDangerousMod(config, [
+    'ios',
+    (config) => {
+      const platformRoot = config.modRequest.platformProjectRoot;
+      const result = findAppDir(platformRoot);
+      if (!result) {
+        console.warn(
+          '[expo-beacon] Could not locate iOS app directory — BeaconGeoPlugin.swift was not written.',
+        );
+        return config;
+      }
+      const outputPath = path.join(platformRoot, result.appDir, 'BeaconGeoPlugin.swift');
+      fs.writeFileSync(outputPath, getIOSPluginSwift());
+      return config;
+    },
+  ]);
+
+  // Step 2 – add BeaconGeoPlugin.swift to the Xcode project target.
   config = withXcodeProject(config, (config) => {
     const xcodeProject = config.modResults;
-    const { projectName, platformProjectRoot } = config.modRequest;
+    const projectName = config.modRequest.projectName;
+    const filePath = `${projectName}/BeaconGeoPlugin.swift`;
 
-    if (!projectName || !platformProjectRoot) return config;
-
-    const swiftFilePath = path.join(platformProjectRoot, projectName, 'BeaconGeoPlugin.swift');
-    fs.writeFileSync(swiftFilePath, IOS_PLUGIN_SWIFT);
-
-    if (!isFileInXcodeProject(xcodeProject, 'BeaconGeoPlugin.swift')) {
-      const groupKey = findPBXGroupKeyByName(xcodeProject, projectName) ?? undefined;
+    if (!xcodeProject.hasFile(filePath)) {
+      // pbxGroupByName returns the group object; addSourceFile needs the UUID key.
+      const groups = xcodeProject.hash.project.objects['PBXGroup'] as Record<string, any>;
+      let groupKey: string | undefined;
+      for (const key of Object.keys(groups)) {
+        if (key.endsWith('_comment')) continue;
+        const g = groups[key];
+        if (g.name === projectName || g.path === projectName) {
+          groupKey = key;
+          break;
+        }
+      }
       xcodeProject.addSourceFile(
-        'BeaconGeoPlugin.swift',
-        null,
-        groupKey ?? undefined,
+        filePath,
+        { target: xcodeProject.getFirstTarget().uuid },
+        groupKey,
       );
     }
 
     return config;
   });
 
-  // Step 2 – patch AppDelegate.swift to register the plugin before super.
-  config = withAppDelegate(config, (config) => {
-    if (config.modResults.language === 'swift') {
-      config.modResults.contents = modifySwiftAppDelegate(config.modResults.contents);
-    } else {
-      console.warn(
-        '[expo-beacon] withBeaconIOS: AppDelegate is not Swift — ' +
-          'please add BeaconLifecycleRegistry.register(BeaconGeoPlugin()) manually.',
-      );
-    }
-    return config;
-  });
+  // Step 3 – patch AppDelegate.swift to register the plugin.
+  config = withDangerousMod(config, [
+    'ios',
+    (config) => {
+      const platformRoot = config.modRequest.platformProjectRoot;
+      const result = findAppDir(platformRoot);
+      if (!result) {
+        console.warn(
+          '[expo-beacon] AppDelegate.swift not found — ' +
+            'please add BeaconLifecycleRegistry.register(BeaconGeoPlugin()) manually.',
+        );
+        return config;
+      }
+      const original = fs.readFileSync(result.appDelegatePath, 'utf-8');
+      fs.writeFileSync(result.appDelegatePath, modifyAppDelegateSwift(original));
+      return config;
+    },
+  ]);
+
+  // Step 4 (opt-in) – CarPlay Driving Task entitlement + scene manifest.
+  if (opts.carplayDrivingTask) {
+    config = withCarPlayDrivingTask(config);
+  }
 
   return config;
 };
+
+// ─── CarPlay Driving Task wiring ──────────────────────────────────────────────
+
+const CARPLAY_ENTITLEMENT_KEY = 'com.apple.developer.carplay-driving-task';
+const CARPLAY_SCENE_DELEGATE_CLASS = 'ExpoBeacon.BeaconCarPlaySceneDelegate';
+const CARPLAY_SCENE_CONFIG_NAME = 'ExpoBeaconCarPlay';
+
+function withCarPlayDrivingTask(config: Parameters<ConfigPlugin>[0]) {
+  // 4a — entitlement
+  config = withEntitlementsPlist(config, (cfg) => {
+    cfg.modResults[CARPLAY_ENTITLEMENT_KEY] = true;
+    return cfg;
+  });
+
+  // 4b — Info.plist scene manifest
+  config = withInfoPlist(config, (cfg) => {
+    const info = cfg.modResults as Record<string, any>;
+    const manifest = (info.UIApplicationSceneManifest =
+      info.UIApplicationSceneManifest ?? {});
+    // Multi-scene support is required for CarPlay scenes to attach.
+    manifest.UIApplicationSupportsMultipleScenes = true;
+    const configurations = (manifest.UISceneConfigurations =
+      manifest.UISceneConfigurations ?? {});
+    const role: any[] = (configurations.CPTemplateApplicationSceneSessionRoleApplication =
+      configurations.CPTemplateApplicationSceneSessionRoleApplication ?? []);
+    const alreadyPresent = role.some(
+      (entry: any) =>
+        entry?.UISceneDelegateClassName === CARPLAY_SCENE_DELEGATE_CLASS ||
+        entry?.UISceneConfigurationName === CARPLAY_SCENE_CONFIG_NAME,
+    );
+    if (!alreadyPresent) {
+      role.push({
+        UISceneClassName: 'CPTemplateApplicationScene',
+        UISceneConfigurationName: CARPLAY_SCENE_CONFIG_NAME,
+        UISceneDelegateClassName: CARPLAY_SCENE_DELEGATE_CLASS,
+      });
+    }
+    return cfg;
+  });
+
+  return config;
+}
 
 export default withBeaconIOS;

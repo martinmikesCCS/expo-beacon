@@ -687,6 +687,65 @@ try {
 
 ---
 
+### CarPlay / Android Auto Detection
+
+Detect when the device connects to a car infotainment system and react in JS — or, when the bundled config plugin is installed, automatically start `react-native-background-geolocation` tracking on connect and stop it on disconnect.
+
+Detection covers both **wired and wireless CarPlay** on iOS and **Android Auto projection / Android Automotive OS** on Android. No special CarPlay entitlement or Android Auto certification is required.
+
+```ts
+import ExpoBeacon, {
+  CarPlayConnectedEvent,
+  CarPlayDisconnectedEvent,
+} from "expo-beacon";
+
+// Start observing
+await ExpoBeacon.startCarPlayMonitoring();
+
+const connectSub = ExpoBeacon.addListener(
+  "onCarPlayConnected",
+  (event: CarPlayConnectedEvent) => {
+    // event.transport: "wired" | "wireless" | "projection" | "native" | "unknown"
+    console.log(`Car connected via ${event.transport}`);
+  },
+);
+const disconnectSub = ExpoBeacon.addListener(
+  "onCarPlayDisconnected",
+  (_event: CarPlayDisconnectedEvent) => {
+    console.log("Car disconnected");
+  },
+);
+
+// Stop later (e.g. when feature is disabled)
+await ExpoBeacon.stopCarPlayMonitoring();
+connectSub.remove();
+disconnectSub.remove();
+```
+
+**How it works**
+
+- **iOS:** observes `AVAudioSession.routeChangeNotification` for output ports of type `.carAudio`. Wired-vs-wireless is reported on a best-effort basis (looking for a coexisting Bluetooth output port).
+- **Android:** observes `androidx.car.app.connection.CarConnection` LiveData. `transport` is `"projection"` for phones casting to a head unit, `"native"` for Android Automotive OS.
+- Connect/disconnect events flow through the same SQLite event log and remote API forwarder as beacon events.
+- When the config plugin is installed, the auto-generated `BeaconGeoPlugin` also calls `BackgroundGeolocation.start()` on connect and `.stop()` on disconnect — no extra wiring required.
+
+**Background detection**
+
+CarPlay observation is **persistent** — the enabled flag is stored in native preferences and the observer is automatically re-attached after app kill or device reboot. `startMonitoring()` also enables CarPlay observation by default; calling `startCarPlayMonitoring()` explicitly is only required if you want CarPlay events without beacon monitoring.
+
+- **Android:** the foreground service hosts the `CarConnection` observer. As long as the service runs (which it does whenever beacon monitoring or CarPlay monitoring is enabled, and is restarted on boot by `BootReceiver`), CarPlay events are captured even after the app process is killed. **Guaranteed background detection.**
+- **iOS:** the observer auto-restarts in the module's `OnCreate`, including background-launches triggered by beacon region monitoring. **iOS cannot wake a terminated app on CarPlay alone** — for guaranteed wake-from-suspension, also call `startMonitoring()` with at least one paired beacon (e.g. a beacon left in the vehicle). Region-wake events trigger a CarPlay state resync to reconcile any route changes that happened while the app was suspended.
+
+**Notes**
+
+- `startCarPlayMonitoring()` is idempotent. Calling it twice does not register a duplicate observer.
+- `stopCarPlayMonitoring()` clears the persisted flag, so the observer will not auto-restart on next launch.
+- The iOS detector does not require the CarPlay entitlement because it only reads the active audio route; you do not need to ship a CarPlay app.
+- On iOS, if the JS bundle is suspended in the background, the JS event delivery is deferred until the app resumes, but the native lifecycle delegate (used by the geolocation plugin) fires immediately on connect.
+- On Android, when CarPlay monitoring is enabled without beacon monitoring, the foreground service shows a generic "Connected device monitoring active" notification.
+
+---
+
 ## Full API Reference
 
 ### `requestPermissionsAsync()`

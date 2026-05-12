@@ -7,7 +7,7 @@ import type {
   MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types.js";
+} from "./ExpoBeacon.types";
 
 const notSupported = (): never => {
   throw new Error("expo-beacon is not supported on web.");
@@ -45,6 +45,7 @@ const stub = {
   requestPermissionsAsync: (): Promise<boolean> => notSupported(),
   enableEventLogging: (): void => notSupported(),
   disableEventLogging: (): void => notSupported(),
+  isEventLoggingEnabled: (): boolean => false,
   getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] => notSupported(),
   clearEventLogs: (): void => notSupported(),
   destroyEventLogs: (): void => notSupported(),
@@ -54,6 +55,9 @@ const stub = {
   getApiEndpoint: (): { url: string | null; apiKey: string | null; id: string | null } => notSupported(),
   isBatteryOptimizationExempt: (): boolean => true,
   requestBatteryOptimizationExemption: (): Promise<boolean> => Promise.resolve(true),
+  startCarPlayMonitoring: (): Promise<void> => Promise.resolve(),
+  stopCarPlayMonitoring: (): Promise<void> => Promise.resolve(),
+  isCarPlayMonitoringEnabled: (): boolean => false,
   addListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => ({
     remove: () => {},
   }),

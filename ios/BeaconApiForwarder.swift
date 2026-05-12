@@ -14,11 +14,6 @@ final class BeaconApiForwarder {
     private let defaults: UserDefaults
     private let session: URLSession
 
-    var isConfigured: Bool {
-        guard let url = defaults.string(forKey: API_URL_KEY) else { return false }
-        return !url.isEmpty
-    }
-
     init(defaults: UserDefaults? = nil) {
         self.defaults = defaults ?? (UserDefaults(suiteName: "expo.modules.beacon") ?? .standard)
         let config = URLSessionConfiguration.default

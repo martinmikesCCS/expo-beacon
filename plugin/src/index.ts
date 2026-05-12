@@ -1,8 +1,14 @@
 import { ConfigPlugin, createRunOncePlugin } from '@expo/config-plugins';
 import withBeaconAndroid from './withBeaconAndroid';
-import withBeaconIOS from './withBeaconIOS';
+import withBeaconIOS, { BeaconIOSPluginProps } from './withBeaconIOS';
 
-const withBeaconBGLocation: ConfigPlugin = (config) => {
+export type BeaconPluginProps = {
+  ios?: BeaconIOSPluginProps;
+};
+
+const withBeaconBGLocation: ConfigPlugin<BeaconPluginProps | void> = (config, props) => {
+  const opts: BeaconPluginProps = props ?? {};
+
   const platform = config.sdkVersion !== undefined
     ? (config as any)._resolvedLinkedPackages?.platform
     : undefined;
@@ -10,7 +16,7 @@ const withBeaconBGLocation: ConfigPlugin = (config) => {
   // Apply iOS plugin only when building for iOS (or when platform is unknown,
   // in which case both are applied — the individual mods are platform-gated).
   if (platform !== 'android') {
-    config = withBeaconIOS(config);
+    config = withBeaconIOS(config, opts.ios);
   }
   if (platform !== 'ios') {
     config = withBeaconAndroid(config);

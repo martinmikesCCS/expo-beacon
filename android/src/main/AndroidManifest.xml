@@ -1,9 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Bluetooth permissions (Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT) -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <!-- Bluetooth permissions.
+         BLUETOOTH and BLUETOOTH_ADMIN are legacy normal permissions required by AltBeacon's
+         PermissionsInspector on all API levels. On Android 12+ they are automatically granted
+         and act as no-ops, but removing them (via maxSdkVersion="30") causes AltBeacon to log
+         errors and believe BLE scanning is unavailable.
+         BLUETOOTH_SCAN and BLUETOOTH_CONNECT cover the runtime permission requirements on API 31+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 

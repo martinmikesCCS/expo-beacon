@@ -29,11 +29,16 @@ class BootReceiver : BroadcastReceiver() {
                 logMemoryKillDiagnostics(context)
                 if (BeaconForegroundService.isMonitoringActive(context)) {
                     tryStartService(context)
+                } else if (BeaconForegroundService.isCarPlayEnabled(context)) {
+                    // CarPlay-only mode: re-attach the observer so it survives reboot.
+                    tryEnableCarPlay(context)
                 }
             }
             ACTION_RETRY_MONITORING -> {
                 if (BeaconForegroundService.isMonitoringActive(context)) {
                     tryStartService(context)
+                } else if (BeaconForegroundService.isCarPlayEnabled(context)) {
+                    tryEnableCarPlay(context)
                 }
             }
         }
@@ -50,6 +55,16 @@ class BootReceiver : BroadcastReceiver() {
             scheduleRetry(context)
         } catch (e: Exception) {
             Log.e(TAG, "BootReceiver: Failed to start service — retrying in ${RETRY_DELAY_MS}ms", e)
+            scheduleRetry(context)
+        }
+    }
+
+    private fun tryEnableCarPlay(context: Context) {
+        try {
+            BeaconForegroundService.enableCarPlay(context)
+            Log.d(TAG, "BootReceiver: CarPlay-only service started successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "BootReceiver: Failed to start CarPlay-only service — retrying in ${RETRY_DELAY_MS}ms", e)
             scheduleRetry(context)
         }
     }

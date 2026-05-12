@@ -24,6 +24,8 @@ import type {
   EddystoneDistanceEvent,
   EddystoneTimeoutEvent,
   EventLogEntry as NativeEventLogEntry,
+  CarPlayConnectedEvent,
+  CarPlayDisconnectedEvent,
 } from "expo-beacon";
 
 interface EventLogEntry {
@@ -63,6 +65,11 @@ export default function App() {
 
   // Battery optimization (Android)
   const [batteryOptExempt, setBatteryOptExempt] = useState<boolean | null>(null);
+
+  // CarPlay / Android Auto monitoring
+  const [isCarPlayMonitoring, setIsCarPlayMonitoring] = useState(false);
+  const [carPlayState, setCarPlayState] = useState<"connected" | "disconnected" | "unknown">("unknown");
+  const [carPlayTransport, setCarPlayTransport] = useState<string>("");
 
   // Refs for continuous scan subscriptions
   const liveScanSubRef = useRef<{ remove: () => void } | null>(null);
@@ -173,9 +180,52 @@ export default function App() {
     };
   }, [addLog]);
 
+  // Subscribe to CarPlay / Android Auto connection events
+  useEffect(() => {
+    const connectSub = ExpoBeacon.addListener(
+      "onCarPlayConnected",
+      (event: CarPlayConnectedEvent) => {
+        setCarPlayState("connected");
+        setCarPlayTransport(event.transport);
+        addLog(`CarPlay CONNECTED (${event.transport})`, "enter");
+      },
+    );
+    const disconnectSub = ExpoBeacon.addListener(
+      "onCarPlayDisconnected",
+      (_event: CarPlayDisconnectedEvent) => {
+        setCarPlayState("disconnected");
+        setCarPlayTransport("");
+        addLog("CarPlay DISCONNECTED", "exit");
+      },
+    );
+    return () => {
+      connectSub.remove();
+      disconnectSub.remove();
+    };
+  }, [addLog]);
+
   // Load paired beacons on mount
   useEffect(() => {
     refreshPairedBeacons();
+  }, []);
+
+  // Rehydrate persisted toggles from native on mount and load existing log
+  // history so the user always sees previously recorded events — even when
+  // event logging is currently turned off, after an app cold-start, or
+  // after the JS bundle was killed.
+  useEffect(() => {
+    try {
+      if (typeof (ExpoBeacon as any).isCarPlayMonitoringEnabled === "function") {
+        setIsCarPlayMonitoring(ExpoBeacon.isCarPlayMonitoringEnabled());
+      }
+      if (typeof (ExpoBeacon as any).isEventLoggingEnabled === "function") {
+        setIsLoggingEnabled(ExpoBeacon.isEventLoggingEnabled());
+      }
+      const logs = ExpoBeacon.getEventLogs({ limit: 50 });
+      setNativeEventLogs(logs);
+    } catch {
+      // Older native build without the new getters — ignore.
+    }
   }, []);
 
   const refreshPairedBeacons = () => {
@@ -406,6 +456,30 @@ export default function App() {
     }
   };
 
+  // ── CarPlay / Android Auto ──
+
+  const handleStartCarPlay = async () => {
+    try {
+      await ExpoBeacon.startCarPlayMonitoring();
+      setIsCarPlayMonitoring(true);
+      addLog("CarPlay monitoring started \u2713");
+    } catch (e: any) {
+      addLog(`CarPlay start failed: ${e.message}`);
+    }
+  };
+
+  const handleStopCarPlay = async () => {
+    try {
+      await ExpoBeacon.stopCarPlayMonitoring();
+      setIsCarPlayMonitoring(false);
+      setCarPlayState("unknown");
+      setCarPlayTransport("");
+      addLog("CarPlay monitoring stopped");
+    } catch (e: any) {
+      addLog(`CarPlay stop failed: ${e.message}`);
+    }
+  };
+
   // ── Notification Config (persistent) ──
 
   const handleApplyNotificationConfig = () => {
@@ -431,6 +505,13 @@ export default function App() {
       ExpoBeacon.enableEventLogging();
       setIsLoggingEnabled(true);
       addLog("Event logging enabled ✓");
+    }
+    // Always refresh the persisted log view so history stays visible
+    // regardless of whether logging is currently on or off.
+    try {
+      setNativeEventLogs(ExpoBeacon.getEventLogs({ limit: 50 }));
+    } catch {
+      /* ignore */
     }
   };
 
@@ -500,6 +581,35 @@ export default function App() {
               )}
             </View>
           )}
+        </Section>
+
+        {/* ── CarPlay / Android Auto ── */}
+        <Section title="CarPlay / Android Auto">
+          <Text style={styles.hint}>
+            Detect when the device connects to a CarPlay (iOS) or Android Auto
+            session. When the config plugin is installed, this also auto-starts
+            background-geolocation tracking on connect and stops on disconnect.
+          </Text>
+          <View style={styles.buttonRow}>
+            <View style={styles.buttonFlex}>
+              <Button
+                title={isCarPlayMonitoring ? "Monitoring \u2713" : "Start"}
+                onPress={handleStartCarPlay}
+                disabled={isCarPlayMonitoring}
+              />
+            </View>
+            <View style={styles.buttonFlex}>
+              <Button
+                title="Stop"
+                onPress={handleStopCarPlay}
+                disabled={!isCarPlayMonitoring}
+              />
+            </View>
+          </View>
+          <Text style={[styles.hint, { marginTop: 8 }]}>
+            State: {carPlayState}
+            {carPlayTransport ? ` (${carPlayTransport})` : ""}
+          </Text>
         </Section>
 
         {/* ── One-Shot Scan ── */}

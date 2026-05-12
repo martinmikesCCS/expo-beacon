@@ -58,4 +58,31 @@ object BeaconPluginRegistry {
             }
         }
     }
+
+    internal fun dispatchTimeout(
+        isEddystone: Boolean,
+        identifier: String,
+        uuid: String,
+        major: Int,
+        minor: Int,
+        namespace: String,
+        instance: String,
+        distance: Double,
+    ) {
+        plugins.forEach { plugin ->
+            if (isEddystone) {
+                plugin.onEddystoneTimeout(identifier, namespace, instance, distance)
+            } else {
+                plugin.onBeaconTimeout(identifier, uuid, major, minor, distance)
+            }
+        }
+    }
+
+    internal fun dispatchCarPlayConnected(transport: String) {
+        plugins.forEach { it.onCarPlayConnected(transport) }
+    }
+
+    internal fun dispatchCarPlayDisconnected() {
+        plugins.forEach { it.onCarPlayDisconnected() }
+    }
 }

@@ -28,9 +28,6 @@ internal class BeaconApiForwarder(private val context: Context) {
         context.getSharedPreferences(API_PREFS, Context.MODE_PRIVATE)
     }
 
-    val isConfigured: Boolean
-        get() = prefs.getString(API_URL_KEY, null)?.isNotEmpty() == true
-
     fun configure(url: String, apiKey: String?, id: String? = null) {
         prefs.edit().apply {
             putString(API_URL_KEY, url)

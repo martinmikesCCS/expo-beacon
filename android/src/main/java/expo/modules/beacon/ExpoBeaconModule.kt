@@ -85,7 +85,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
     override fun definition() = ModuleDefinition {
         Name("ExpoBeacon")
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError", "onCarPlayConnected", "onCarPlayDisconnected")
 
         AsyncFunction("scanForBeaconsAsync") { uuids: List<String>?, scanDurationMs: Int, promise: Promise ->
             if (scanDurationMs <= 0) {
@@ -290,6 +290,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             var exitDistance: Double? = null
             var minRssi: Int? = null
             var level: String = "all"
+            var exitTimeoutSeconds: Double? = null
             when (options) {
                 is Double -> maxDistance = options
                 is Map<*, *> -> {
@@ -299,6 +300,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     exitDistance = (map["exitDistance"] as? Number)?.toDouble()
                     minRssi = (map["minRssi"] as? Number)?.toInt()
                     level = (map["level"] as? String) ?: "all"
+                    exitTimeoutSeconds = (map["exitTimeoutSeconds"] as? Number)?.toDouble()
                     val notifications = map["notifications"]
                     if (notifications is Map<*, *>) {
                         @Suppress("UNCHECKED_CAST")
@@ -327,6 +329,11 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_EXIT_DISTANCE", "message" to "exitDistance must be greater than or equal to maxDistance"))
                 return@AsyncFunction
             }
+            if (exitTimeoutSeconds != null && (!exitTimeoutSeconds.isFinite() || exitTimeoutSeconds <= 0.0)) {
+                promise.reject("INVALID_EXIT_TIMEOUT", "exitTimeoutSeconds must be a finite number greater than 0", null)
+                sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "INVALID_EXIT_TIMEOUT", "message" to "exitTimeoutSeconds must be a finite number greater than 0"))
+                return@AsyncFunction
+            }
             ctx.getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
                 .edit().apply {
                     if (maxDistance != null) putString("max_distance", maxDistance.toString())
@@ -336,6 +343,8 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                     if (minRssi != null) putInt("min_rssi", minRssi)
                     else remove("min_rssi")
                     putString("level", level)
+                    if (exitTimeoutSeconds != null) putString("exit_timeout_seconds", exitTimeoutSeconds.toString())
+                    else remove("exit_timeout_seconds")
                 }.apply()
             // Verify we have the permissions needed for background monitoring
             val hasLocation = ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -367,6 +376,10 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 sendEvent("onBeaconError", mapOf("identifier" to "", "code" to "SERVICE_START_FAILED", "message" to "Failed to start monitoring service: ${e.message}"))
                 return@AsyncFunction
             }
+            // Auto-enable CarPlay observation alongside beacon monitoring so
+            // the service captures CarPlay/Android Auto events for the same
+            // lifetime. Users can opt out at any time via stopCarPlayMonitoring().
+            try { BeaconForegroundService.enableCarPlay(ctx) } catch (_: Throwable) {}
             promise.resolve(null)
         }
 
@@ -450,6 +463,11 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             loggingEnabled = false
         }
 
+        Function("isEventLoggingEnabled") {
+            val ctx = appContext.reactContext ?: return@Function false
+            BeaconEventLogger.isLoggingEnabled(ctx)
+        }
+
         Function("getEventLogs") { options: Map<String, Any?>? ->
             val logger = getOrCreateEventLogger() ?: return@Function emptyList<Map<String, Any?>>()
             val limit = (options?.get("limit") as? Number)?.toInt() ?: 1000
@@ -495,6 +513,7 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
                 optPrefs.getString("exit_distance", null)?.toDoubleOrNull()?.let { put("exitDistance", it) }
                 if (optPrefs.contains("min_rssi")) put("minRssi", optPrefs.getInt("min_rssi", -85))
                 optPrefs.getString("level", null)?.let { put("level", it) }
+                optPrefs.getString("exit_timeout_seconds", null)?.toDoubleOrNull()?.let { put("exitTimeoutSeconds", it) }
                 val json = ctx.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
                     .getString("config", null)
                 if (json != null) {
@@ -552,8 +571,51 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             }
         }
 
+        // MARK: - CarPlay / Android Auto
+
+        AsyncFunction("startCarPlayMonitoring") { promise: Promise ->
+            val ctx = appContext.reactContext
+            if (ctx == null) {
+                promise.reject("NO_CONTEXT", "React context is not available", null)
+                return@AsyncFunction
+            }
+            try {
+                BeaconForegroundService.enableCarPlay(ctx)
+                promise.resolve(null)
+            } catch (e: Throwable) {
+                promise.reject("CARPLAY_START_FAILED", "Failed to start CarPlay monitoring: ${e.message}", e)
+            }
+        }
+
+        AsyncFunction("stopCarPlayMonitoring") { promise: Promise ->
+            val ctx = appContext.reactContext
+            if (ctx == null) {
+                promise.reject("NO_CONTEXT", "React context is not available", null)
+                return@AsyncFunction
+            }
+            try {
+                BeaconForegroundService.disableCarPlay(ctx)
+                promise.resolve(null)
+            } catch (e: Throwable) {
+                promise.reject("CARPLAY_STOP_FAILED", "Failed to stop CarPlay monitoring: ${e.message}", e)
+            }
+        }
+
+        Function("isCarPlayMonitoringEnabled") {
+            val ctx = appContext.reactContext ?: return@Function false
+            BeaconForegroundService.isCarPlayEnabled(ctx)
+        }
+
+        OnCreate {
+            // Register this module instance for best-effort JS-bridge fan-out
+            // of CarPlay events emitted by the foreground service. The service
+            // holds a weak reference; cleared in OnDestroy.
+            BeaconForegroundService.bindModule(this@ExpoBeaconModule)
+        }
+
         OnDestroy {
             with(this@ExpoBeaconModule) {
+                BeaconForegroundService.bindModule(null)
                 unregisterEventReceiver()
                 loggingEnabled = false
                 eventLogger?.close()
@@ -996,5 +1058,15 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
         if (!isEventLoggingEnabled()) return
         val identifier = params["identifier"] as? String
         getOrCreateEventLogger()?.logEvent(eventType, identifier, params)
+    }
+
+    /**
+     * Called by [BeaconForegroundService] (via weak reference) when it emits a
+     * CarPlay event from its own observer. Best-effort delivery to the JS bridge
+     * — the service has already handled SQLite logging, API forwarding, and
+     * native plugin dispatch, so this method only needs to relay to JS.
+     */
+    fun forwardCarPlayEventFromService(eventName: String, payload: Map<String, Any?>) {
+        try { sendEvent(eventName, payload) } catch (_: Throwable) { /* JS bridge may be torn down */ }
     }
 }

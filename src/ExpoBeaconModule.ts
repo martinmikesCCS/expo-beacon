@@ -12,7 +12,7 @@ import {
   MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types.js";
+} from "./ExpoBeacon.types";
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /**
@@ -145,6 +145,12 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   disableEventLogging(): void;
 
   /**
+   * Returns whether SQLite event logging is currently enabled.
+   * Reads the persisted flag, so this stays accurate across app cold-starts.
+   */
+  isEventLoggingEnabled(): boolean;
+
+  /**
    * Retrieve logged beacon events from the SQLite database.
    * @param options Optional filters (limit, eventType, sinceTimestamp).
    */
@@ -189,6 +195,56 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * Each field is `null` if not set.
    */
   getApiEndpoint(): { url: string | null; apiKey: string | null; id: string | null };
+
+  /**
+   * Start observing CarPlay (iOS) / Android Auto (Android) connection state.
+   *
+   * Emits `onCarPlayConnected` and `onCarPlayDisconnected` JS events. Events are
+   * also written to the SQLite event log and forwarded to the configured API
+   * endpoint, and dispatched to native lifecycle plugins (used by the auto-
+   * generated geolocation plugin to start/stop background-geolocation).
+   *
+   * **Persistent.** The enabled state is stored in native preferences and
+   * survives app kill / device reboot. Call `stopCarPlayMonitoring()` to
+   * disable. `startMonitoring()` also enables CarPlay observation
+   * automatically — calling this method explicitly is only required if you
+   * want CarPlay events without beacon monitoring.
+   *
+   * **Background behavior:**
+   * - **Android**: the foreground service hosts the observer and continues to
+   *   receive `CarConnection` events even after the app process is killed and
+   *   restarted via `BootReceiver`. Guaranteed background detection.
+   * - **iOS**: the observer auto-restarts in `OnCreate` whenever the module
+   *   is recreated, including background-launches triggered by beacon region
+   *   monitoring. **iOS cannot wake a terminated app on CarPlay alone** — for
+   *   guaranteed wake-from-suspension, also call `startMonitoring()` with at
+   *   least one paired beacon. Region wake events trigger a CarPlay state
+   *   resync to reconcile any route changes that occurred during suspension.
+   *
+   * - iOS: observes `AVAudioSession.routeChangeNotification` for `.carAudio` ports.
+   *   No CarPlay entitlement required.
+   * - Android: observes `androidx.car.app.connection.CarConnection` LiveData.
+   *   No Android Auto certification required.
+   * - Web: no-op (resolves immediately).
+   */
+  startCarPlayMonitoring(): Promise<void>;
+
+  /**
+   * Stop CarPlay / Android Auto connection monitoring and clear the persisted
+   * "enabled" flag so the observer is not auto-restarted on next launch / boot.
+   *
+   * On Android, if no beacon monitoring is active, the foreground service
+   * stops itself.
+   */
+  stopCarPlayMonitoring(): Promise<void>;
+
+  /**
+   * Returns whether CarPlay / Android Auto observation is currently enabled.
+   * Reads the persisted flag, so the value survives app cold-starts and
+   * reflects the native source of truth (foreground service on Android,
+   * UserDefaults suite on iOS).
+   */
+  isCarPlayMonitoringEnabled(): boolean;
 }
 
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

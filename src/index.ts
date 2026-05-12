@@ -24,4 +24,7 @@ export type {
   EddystoneTimeoutEvent,
   EventLogQueryOptions,
   EventLogEntry,
-} from "./ExpoBeacon.types.js";
+  CarPlayTransport,
+  CarPlayConnectedEvent,
+  CarPlayDisconnectedEvent,
+} from "./ExpoBeacon.types";

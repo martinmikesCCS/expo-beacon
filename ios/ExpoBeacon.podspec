@@ -19,8 +19,11 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
 
-  # Required system frameworks for iBeacon monitoring + wildcard BLE scanning
-  s.frameworks = 'CoreLocation', 'CoreBluetooth', 'UserNotifications'
+  # Required system frameworks for iBeacon monitoring + wildcard BLE scanning.
+  # CarPlay is used by `BeaconCarPlaySceneDelegate` for the optional "Driving
+  # Task" entitlement integration; linking is harmless when the entitlement is
+  # not granted.
+  s.frameworks = 'CoreLocation', 'CoreBluetooth', 'UserNotifications', 'CarPlay', 'AVFoundation'
 
   # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {

@@ -1,10 +1,10 @@
 package expo.modules.beacon
 
 // Shared constants used across ExpoBeaconModule and BeaconForegroundService.
-// NOTE: EXIT_MISS_THRESHOLD and scan timing deviate from iOS intentionally —
-// Android requires a non-zero between-scan gap to prevent OS-level BLE
-// throttling, and a higher miss threshold to tolerate brief scan pauses.
-// HYSTERESIS_COUNT should stay in sync with ExpoBeaconModule.swift (iOS).
+// NOTE: Scan timing deviates from iOS intentionally — Android requires a non-zero
+// between-scan gap to prevent OS-level BLE throttling.
+// ENTER_HYSTERESIS_COUNT and EXIT_HYSTERESIS_COUNT should stay in sync with
+// ExpoBeaconModule.swift (iOS).
 
 internal const val PREFS_NAME = "expo.beacon.paired"
 internal const val PREFS_KEY = "paired_beacons"
@@ -43,21 +43,18 @@ internal const val REGION_EXIT_PERIOD_MS = 60000L
 internal const val RECENT_RANGING_SIGHTING_GRACE_MS = REGION_EXIT_PERIOD_MS
 
 /**
- * Number of consecutive ranging misses before emitting a distance-based exit event.
- * With a ~2.1 s scan cycle (1100 ms scan + 1000 ms gap), 10 misses ≈ 21 s of
- * silence before declaring exit — tolerant of brief BLE gaps while still
- * responsive to actual departures.
- */
-internal const val EXIT_MISS_THRESHOLD = 10
-
-/**
  * Milliseconds of no valid BLE readings before starting the timeout countdown.
  * Acts as a safety net when ranging cycles stop entirely (e.g. Doze mode).
  */
 internal const val DISTANCE_INACTIVITY_MS = 60_000L
 
-/** Number of consecutive readings required to confirm a distance-based enter or exit transition. */
-internal const val HYSTERESIS_COUNT = 3
+/** Number of consecutive in-range readings required to confirm a distance-based enter transition. */
+internal const val ENTER_HYSTERESIS_COUNT = 1
+/** Number of consecutive out-of-range readings required to confirm a distance-based exit transition. */
+internal const val EXIT_HYSTERESIS_COUNT = 3
+
+/** Default seconds of silence after last sighting before a disappearance-based exit fires. */
+internal const val DEFAULT_EXIT_TIMEOUT_SECONDS = 300.0
 
 /** Default minimum RSSI (dBm) below which beacon readings are discarded as unreliable. */
 internal const val DEFAULT_MIN_RSSI = -85

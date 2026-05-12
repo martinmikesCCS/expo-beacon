@@ -130,6 +130,8 @@ export type MonitoringConfig = {
   exitDistance?: number;
   minRssi?: number;
   level?: 'all' | 'events';
+  /** Seconds after last beacon sighting before an exit event fires. Default: 300. */
+  exitTimeoutSeconds?: number;
   notifications?: NotificationConfig;
 };
 
@@ -186,6 +188,13 @@ export type MonitoringOptions = {
    * - `'events'`: enter + exit + timeout only (no distance events).
    */
   level?: 'all' | 'events';
+  /**
+   * Seconds after last beacon sighting before an exit event fires when the beacon
+   * disappears without moving outside the exit distance threshold.
+   *
+   * Default: 300 (5 minutes). Minimum: 1.
+   */
+  exitTimeoutSeconds?: number;
   /** Notification configuration overrides to apply for this monitoring session. */
   notifications?: NotificationConfig;
 };
@@ -265,6 +274,27 @@ export type EddystoneTimeoutEvent = {
   distance: number;
 };
 
+/** Transport reported with CarPlay / Android Auto connection events. */
+export type CarPlayTransport =
+  | "wired"      // iOS CarPlay over USB / Lightning
+  | "wireless"   // iOS CarPlay over Bluetooth + Wi-Fi
+  | "projection" // Android Auto projection (phone projecting to head unit)
+  | "native"     // Android Automotive OS (running on the head unit)
+  | "unknown";
+
+/** Payload fired when the device connects to a CarPlay or Android Auto session. */
+export type CarPlayConnectedEvent = {
+  transport: CarPlayTransport;
+  /** Timestamp in milliseconds since epoch. */
+  timestamp: number;
+};
+
+/** Payload fired when the device disconnects from a CarPlay or Android Auto session. */
+export type CarPlayDisconnectedEvent = {
+  /** Timestamp in milliseconds since epoch. */
+  timestamp: number;
+};
+
 /** Payload for native beacon error events (monitoring/ranging failures). */
 export type BeaconErrorEvent = {
   /** Region or constraint identifier, empty string if unavailable. */
@@ -293,6 +323,10 @@ export type ExpoBeaconModuleEvents = {
   onEddystoneTimeout: (params: EddystoneTimeoutEvent) => void;
   /** Fired when a native monitoring or ranging failure occurs (logged to DB and forwarded to JS). */
   onBeaconError: (params: BeaconErrorEvent) => void;
+  /** Fired when the device connects to a CarPlay (iOS) or Android Auto (Android) session. */
+  onCarPlayConnected: (params: CarPlayConnectedEvent) => void;
+  /** Fired when the device disconnects from a CarPlay (iOS) or Android Auto (Android) session. */
+  onCarPlayDisconnected: (params: CarPlayDisconnectedEvent) => void;
 };
 
 /** Options for filtering event logs. */

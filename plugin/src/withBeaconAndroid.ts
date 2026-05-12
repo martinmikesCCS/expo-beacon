@@ -10,19 +10,35 @@ package ${packageName}
 
 import android.content.Context
 import com.transistorsoft.locationmanager.adapter.BackgroundGeolocation
+import com.transistorsoft.locationmanager.adapter.callback.TSCallback
 import expo.modules.beacon.BeaconEventPlugin
 
 class BeaconGeoPlugin(ctx: Context) : BeaconEventPlugin {
     private val bgGeo = BackgroundGeolocation.getInstance(ctx, null)
+    private val noOp = object : TSCallback {
+        override fun onSuccess() {}
+        override fun onFailure(error: String) {}
+    }
 
     override fun onBeaconEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
-        bgGeo.start(null)
+        bgGeo.start(noOp)
     override fun onBeaconExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
-        bgGeo.stop(null)
+        bgGeo.stop(noOp)
+    override fun onBeaconTimeout(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
+        bgGeo.stop(noOp)
     override fun onEddystoneEnter(identifier: String, namespace: String, instance: String, distance: Double) =
-        bgGeo.start(null)
+        bgGeo.start(noOp)
     override fun onEddystoneExit(identifier: String, namespace: String, instance: String, distance: Double) =
-        bgGeo.stop(null)
+        bgGeo.stop(noOp)
+    override fun onEddystoneTimeout(identifier: String, namespace: String, instance: String, distance: Double) =
+        bgGeo.stop(noOp)
+    // Start tracking when the device connects to Android Auto, stop when it disconnects.
+    override fun onCarPlayConnected(transport: String) {
+        bgGeo.start(noOp)
+    }
+    override fun onCarPlayDisconnected() {
+        bgGeo.stop(noOp)
+    }
 }
 `;
 }
