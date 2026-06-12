@@ -335,6 +335,89 @@ export type CarPlayDisconnectedEvent = {
   timestamp: number;
   /** ISO 8601 UTC representation of {@link timestamp} (e.g. "2026-05-12T14:23:45.678Z"). */
   timestampIso?: string;
+  /**
+   * Reason this disconnect was emitted. Absent for normal real-time disconnects.
+   * `"reconciled"` indicates the disconnect was synthesized after the module was
+   * recreated in a new process and detected that the previously persisted CarPlay
+   * state no longer matches the current connection — i.e. the disconnect happened
+   * off-process (force-quit, OS reclaim, abrupt cable yank) and is being delivered
+   * post-hoc. Emitted on both iOS and Android.
+   */
+  reason?: "reconciled";
+};
+
+/**
+ * Snapshot of the current CarPlay / Android Auto connection state, returned by
+ * {@link ExpoBeaconModule.getCarPlayConnectionStatus}.
+ */
+export type CarPlayConnectionStatus = {
+  /** `true` if a CarPlay or Android Auto session is currently active. */
+  connected: boolean;
+  /**
+   * Connection transport type. Present only when `connected` is `true`.
+   * See {@link CarPlayTransport} for possible values.
+   */
+  transport?: CarPlayTransport;
+  /** Unix-millisecond timestamp of last connect. Present only when `connected` is `true`. */
+  timestamp?: number;
+  /** ISO 8601 UTC timestamp of last connect. Present only when `connected` is `true`. */
+  timestampIso?: string;
+};
+
+/**
+ * Diagnostic snapshot for troubleshooting CarPlay / Android Auto detection.
+ * Returned by {@link ExpoBeaconModule.getCarPlayDiagnostics}.
+ *
+ * The most common failure mode on Android is that the host app is not
+ * registered as an Android Auto-aware app (missing
+ * `com.google.android.gms.car.application` meta-data + `automotive_app_desc.xml`
+ * resource). When that happens, Gearhead silently reports
+ * `CONNECTION_TYPE_NOT_CONNECTED` to the app regardless of `<queries>`
+ * declarations, so `onCarPlayConnected` events never fire.
+ *
+ * Inspect this object after calling `startCarPlayMonitoring()` and confirming
+ * Android Auto is connected on the head unit. If `isCarAppMetadataPresent` or
+ * `isCarProviderQueryable` is `false`, the consumer app needs to enable the
+ * config plugin's `android.androidAuto.register` option (default in recent
+ * versions) and re-run `expo prebuild`.
+ *
+ * On iOS the diagnostic is a best-effort stub — most fields are not applicable
+ * because CarPlay detection uses `AVAudioSession` rather than a content
+ * provider.
+ */
+export type CarPlayDiagnostics = {
+  /**
+   * Android: `true` if the host app's manifest declares the
+   * `com.google.android.gms.car.application` meta-data tag (required for
+   * Gearhead to expose connection state to the app). iOS: always `true`.
+   */
+  isCarAppMetadataPresent: boolean;
+  /**
+   * Android: `true` if the system can resolve at least one provider for the
+   * `androidx.car.app.connection.action.CAR_PROVIDER` intent (requires the
+   * `<queries>` declaration shipped by this library AND a compatible Gearhead
+   * / AAOS install on the device). iOS: always `true`.
+   */
+  isCarProviderQueryable: boolean;
+  /**
+   * Android: most recent raw value read from `CarConnection.getType()`.
+   * `0` = `NOT_CONNECTED`, `1` = `NATIVE` (AAOS), `2` = `PROJECTION`.
+   * `null` if the observer has not yet received any value (or is not running).
+   * iOS: `null`.
+   */
+  lastRawConnectionType: number | null;
+  /**
+   * `true` if the underlying connection observer is currently active.
+   * On Android, equivalent to "the foreground service is running AND
+   * `CarPlayMonitor.start()` succeeded". On iOS, the audio-session observer
+   * is registered.
+   */
+  observerActive: boolean;
+  /**
+   * Android: `true` if the foreground service hosting the observer is alive.
+   * iOS: always `true` (no background service involved).
+   */
+  serviceAlive: boolean;
 };
 
 /** Payload for native beacon error events (monitoring/ranging failures). */

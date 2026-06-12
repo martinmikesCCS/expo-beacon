@@ -606,6 +606,25 @@ class ExpoBeaconModule : Module(), BeaconConsumer {
             BeaconForegroundService.isCarPlayEnabled(ctx)
         }
 
+        Function("getCarPlayConnectionStatus") {
+            val ctx = appContext.reactContext ?: return@Function mapOf("connected" to false)
+            BeaconForegroundService.getCarPlayStatus(ctx)
+        }
+
+        Function("getCarPlayDiagnostics") {
+            val ctx = appContext.reactContext
+            if (ctx == null) {
+                return@Function mapOf(
+                    "isCarAppMetadataPresent" to false,
+                    "isCarProviderQueryable" to false,
+                    "lastRawConnectionType" to null,
+                    "observerActive" to false,
+                    "serviceAlive" to false,
+                )
+            }
+            BeaconForegroundService.getCarPlayDiagnostics(ctx)
+        }
+
         OnCreate {
             // Register this module instance for best-effort JS-bridge fan-out
             // of CarPlay events emitted by the foreground service. The service

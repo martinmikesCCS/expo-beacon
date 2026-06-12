@@ -29,4 +29,6 @@ export type {
   CarPlayTransport,
   CarPlayConnectedEvent,
   CarPlayDisconnectedEvent,
+  CarPlayConnectionStatus,
+  CarPlayDiagnostics,
 } from "./ExpoBeacon.types";

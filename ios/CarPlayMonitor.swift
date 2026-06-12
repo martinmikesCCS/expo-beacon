@@ -33,11 +33,17 @@ final class CarPlayMonitor {
     private var observer: NSObjectProtocol?
     private var emit: Emit?
     private var isConnected: Bool = false
+    /// Optional persistence target for last-known connection state. Injected via
+    /// `start(emit:defaults:)`. When set, every connect/disconnect emission is
+    /// mirrored to `CARPLAY_LAST_CONNECTED_KEY` so a freshly relaunched process
+    /// can detect a missed disconnect via `reconcileOnProcessStart()`.
+    private var defaults: UserDefaults?
     /// When `true`, an authoritative source (CarPlay scene delegate, granted via the
     /// `com.apple.developer.carplay-driving-task` entitlement) is providing
     /// connect/disconnect events. The audio-session observer becomes a passive
     /// secondary signal only — it will not emit events, to avoid duplicate
-    /// connect/disconnect notifications.
+    /// connect/disconnect notifications. Reset to `false` on entitled disconnect
+    /// so the audio-session fallback can take over for any subsequent events.
     private var isEntitledMode: Bool = false
 
     private init() {}
@@ -46,10 +52,17 @@ final class CarPlayMonitor {
     /// previous emit callback but does not register a duplicate observer.
     /// Emits an immediate `onCarPlayConnected` event if a CarPlay route is
     /// already active at the time of the call.
-    func start(emit: @escaping Emit) {
+    ///
+    /// - Parameter defaults: Optional `UserDefaults` suite used to persist the
+    ///   last-known connection state for cross-process reconciliation. When the
+    ///   module is recreated in a new process (e.g. after a background-wake)
+    ///   the persisted value is used by `reconcileOnProcessStart()` to
+    ///   synthesize a missed disconnect. Pass `nil` to disable persistence.
+    func start(emit: @escaping Emit, defaults: UserDefaults? = nil) {
         queue.async { [weak self] in
             guard let self = self else { return }
             self.emit = emit
+            if defaults != nil { self.defaults = defaults }
             if self.observer == nil {
                 self.observer = NotificationCenter.default.addObserver(
                     forName: AVAudioSession.routeChangeNotification,
@@ -69,7 +82,10 @@ final class CarPlayMonitor {
         }
     }
 
-    /// Stop observing route changes and clear the emit callback.
+    /// Stop observing route changes and clear the emit callback. Also clears
+    /// the persisted last-known state so a subsequent `start(...)` in a future
+    /// process doesn't trigger a spurious reconciliation. Call this only when
+    /// the user has explicitly opted out of CarPlay monitoring.
     func stop() {
         queue.async { [weak self] in
             guard let self = self else { return }
@@ -80,6 +96,8 @@ final class CarPlayMonitor {
             }
             self.emit = nil
             self.isConnected = false
+            self.isEntitledMode = false
+            self.persistConnectionState(false)
         }
     }
 
@@ -118,13 +136,17 @@ final class CarPlayMonitor {
     }
 
     /// Called by `BeaconCarPlaySceneDelegate.templateApplicationScene(_:didDisconnect:)`.
-    /// Emits `onCarPlayDisconnected` and keeps the entitled-mode flag set so
-    /// subsequent audio-session events remain suppressed (the scene delegate is
-    /// the source of truth for the lifetime of the process).
+    /// Emits `onCarPlayDisconnected` and clears the entitled-mode flag so the
+    /// audio-session fallback path becomes authoritative again until the next
+    /// entitled connect. Without this reset, a single missed scene-delegate
+    /// disconnect (force-quit, OS reclaim, abrupt cable yank between connect
+    /// and disconnect callbacks) would silently suppress the audio-session
+    /// fallback for the rest of the process lifetime.
     func notifyEntitledDisconnect() {
         queue.async { [weak self] in
             guard let self = self else { return }
             os_log("CarPlay scene disconnected (entitled source)", log: self.log, type: .info)
+            self.isEntitledMode = false
             if self.isConnected {
                 self.isConnected = false
                 self.emitDisconnected()
@@ -163,13 +185,20 @@ final class CarPlayMonitor {
                 return
             }
         }
+        let (connected, transport) = Self.currentCarPlayState()
         // When an entitled CarPlay scene source is active it is authoritative.
         // The audio-session signal is kept as a redundant secondary check but
         // must NOT emit events — the scene delegate already did, or will.
+        // We DO still update the cached `isConnected` snapshot and persist it
+        // so that cross-process reconciliation (`reconcileOnProcessStart`) and
+        // the post-entitled-disconnect fallback path see an accurate state.
         if isEntitledMode {
+            if connected != isConnected {
+                isConnected = connected
+                persistConnectionState(connected)
+            }
             return
         }
-        let (connected, transport) = Self.currentCarPlayState()
         if connected == isConnected { return }
         isConnected = connected
         if connected {
@@ -179,6 +208,37 @@ final class CarPlayMonitor {
         }
     }
 
+    // MARK: - Cross-process reconciliation
+
+    /// Compare persisted last-known state against the current audio route and
+    /// emit a synthetic `onCarPlayDisconnected` if persisted=connected but the
+    /// route is no longer CarPlay. Use case: the previous process was killed or
+    /// suspended-then-OS-reclaimed while CarPlay was connected, and the disconnect
+    /// fired off-process. JS listeners attached to the freshly recreated module
+    /// would otherwise never learn the session ended.
+    ///
+    /// Must be called AFTER `start(emit:defaults:)` so the emit callback is
+    /// installed and persistence target is known. Idempotent.
+    func reconcileOnProcessStart() {
+        queue.async { [weak self] in
+            guard let self = self else { return }
+            guard let defaults = self.defaults else { return }
+            let persistedConnected = defaults.bool(forKey: CARPLAY_LAST_CONNECTED_KEY)
+            let (currentConnected, _) = Self.currentCarPlayState()
+            if persistedConnected && !currentConnected {
+                os_log("CarPlay reconcile: persisted=connected, current=disconnected — emitting synthetic disconnect", log: self.log, type: .info)
+                self.isConnected = false
+                self.emitDisconnected(reason: "reconciled")
+            }
+        }
+    }
+
+    /// Write the current connection state to the injected `UserDefaults` suite
+    /// (when available). No-op when persistence wasn't configured.
+    private func persistConnectionState(_ connected: Bool) {
+        defaults?.set(connected, forKey: CARPLAY_LAST_CONNECTED_KEY)
+    }
+
     private func emitConnected(transport: String) {
         let now = Date()
         let payload: [String: Any] = [
@@ -186,15 +246,24 @@ final class CarPlayMonitor {
             "timestamp": now.timeIntervalSince1970 * 1000.0,
             "timestampIso": Self.isoFormatter.string(from: now),
         ]
+        persistConnectionState(true)
         emit?("onCarPlayConnected", payload)
     }
 
-    private func emitDisconnected() {
+    /// Emit a disconnect event. When `reason` is non-nil it is included in the
+    /// payload so consumers can distinguish real-time disconnects from
+    /// post-hoc reconciled ones (currently `"reconciled"` from
+    /// `reconcileOnProcessStart`). Additive, non-breaking.
+    private func emitDisconnected(reason: String? = nil) {
         let now = Date()
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "timestamp": now.timeIntervalSince1970 * 1000.0,
             "timestampIso": Self.isoFormatter.string(from: now),
         ]
+        if let reason = reason {
+            payload["reason"] = reason
+        }
+        persistConnectionState(false)
         emit?("onCarPlayDisconnected", payload)
     }
 

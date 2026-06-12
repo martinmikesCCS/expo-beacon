@@ -97,7 +97,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     // CarConnection events are captured for as long as the service runs —
     // independent of the JS bridge / module lifecycle. Survives app suspension
     // and (via BootReceiver) device reboot.
-    @Volatile private var carPlayMonitor: CarPlayMonitor? = null
+    // `internal` so the companion's `getCarPlayStatus()` and `reEmitCarPlayStateIfNeeded`
+    // can read it directly (all callers are within the same package).
+    @Volatile internal var carPlayMonitor: CarPlayMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -129,6 +131,11 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         // observer with no JS interaction required.
         if (isCarPlayEnabled(this)) {
             startCarPlayObserverInternal()
+            // Re-arm the WorkManager watchdog on every cold start. KEEP policy
+            // makes this a cheap no-op if a schedule already exists, but it
+            // recovers the schedule if WorkManager's DB was wiped by an OEM
+            // cleaner or by a `pm clear` from adb.
+            CarPlayWatchdogWorker.schedule(this)
         }
     }
 
@@ -151,8 +158,12 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             Log.e(TAG, "startForeground failed (retry=$retryCount) — stopping service", e)
             sendErrorBroadcast(null, "SERVICE_START_FAILED", "startForeground failed (retry=$retryCount): ${e.message}")
             // Schedule a retry so monitoring can recover without user interaction, capped to
-            // avoid infinite crash loops. Only retry if monitoring should still be active.
-            if (retryCount < MAX_STARTFOREGROUND_RETRIES && isMonitoringActive(this)) {
+            // avoid infinite crash loops. Retry if EITHER beacon monitoring OR CarPlay
+            // observation is supposed to be active — without the CarPlay branch the
+            // service silently dies when the very first startCarPlayMonitoring() call
+            // races with a transient BT permission / FGS-restriction failure.
+            if (retryCount < MAX_STARTFOREGROUND_RETRIES &&
+                (isMonitoringActive(this) || isCarPlayEnabled(this))) {
                 scheduleServiceRetry(retryCount + 1)
             }
             stopSelf()
@@ -841,6 +852,63 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     /**
+     * Re-emit CarPlay state to a freshly-bound module. Invoked from [bindModule]
+     * whenever a new [ExpoBeaconModule] attaches while the foreground service is
+     * already running (typical after the app process is killed and relaunched).
+     *
+     * Three outcomes:
+     *  1. Observer running + car connected → re-emit `onCarPlayConnected` (JS-only;
+     *     SQLite / API / registry already ran when the event originally fired).
+     *  2. Observer running + car disconnected + JS last knew "connected" →
+     *     emit synthetic `onCarPlayDisconnected` with `reason = "reconciled"`.
+     *  3. Observer not yet running (fresh service start) → LiveData delivers
+     *     the initial value naturally; no action needed.
+     */
+    private fun reEmitCarPlayStateIfNeeded(module: ExpoBeaconModule) {
+        val monitor = carPlayMonitor ?: return
+        if (!monitor.isObserving()) return  // Fresh service start; LiveData handles first delivery.
+
+        val connPayload = monitor.buildConnectedPayload()
+        if (connPayload != null) {
+            // Car is still connected — give the new module the current state.
+            try { module.forwardCarPlayEventFromService("onCarPlayConnected", connPayload) } catch (_: Throwable) {}
+            return
+        }
+
+        // Car is disconnected. If JS last knew it was connected, synthesise a
+        // reconciled disconnect (mirrors iOS `reconcileOnProcessStart()`).
+        if (readJsConnected()) {
+            val now = System.currentTimeMillis()
+            val payload = mapOf<String, Any?>(
+                "timestamp" to now,
+                "timestampIso" to buildIsoTimestamp(now),
+                "reason" to "reconciled",
+            )
+            try { module.forwardCarPlayEventFromService("onCarPlayDisconnected", payload) } catch (_: Throwable) {}
+            writeJsConnected(false)
+        }
+    }
+
+    // MARK: - JS delivery state helpers
+
+    private fun readJsConnected(): Boolean =
+        try { getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE).getBoolean("js_connected", false) }
+        catch (_: Throwable) { false }
+
+    private fun writeJsConnected(connected: Boolean) {
+        try {
+            getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE)
+                .edit().putBoolean("js_connected", connected).apply()
+        } catch (_: Throwable) {}
+    }
+
+    private fun buildIsoTimestamp(millis: Long): String {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+        return sdf.format(java.util.Date(millis))
+    }
+
+    /**
      * Fan out a CarPlay event to all sinks: SQLite log, remote API forwarder,
      * native plugin registry, and (best-effort) the live JS bridge. Runs from
      * the main thread (CarPlayMonitor's emit hop).
@@ -865,7 +933,12 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             "onCarPlayDisconnected" -> BeaconPluginRegistry.dispatchCarPlayDisconnected()
         }
         // Best-effort delivery to the live JS bridge if a module instance is bound.
-        try { boundModule?.get()?.forwardCarPlayEventFromService(eventName, payload) } catch (_: Throwable) {}
+        // Also track JS delivery state so a future module rebind can reconcile.
+        try {
+            val m = boundModule?.get()
+            m?.forwardCarPlayEventFromService(eventName, payload)
+            if (m != null) writeJsConnected(eventName == "onCarPlayConnected")
+        } catch (_: Throwable) {}
         // Local notification for connect/disconnect (config-gated).
         try {
             when (eventName) {
@@ -997,6 +1070,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
         private const val PREF_IS_MONITORING = "expo.beacon.is_monitoring"
         private const val PREF_CARPLAY_ENABLED = "expo.beacon.carplay_enabled"
+        /** Tracks what the JS layer last received — used for reconciled-disconnect on module rebind. */
+        private const val PREF_CARPLAY_JS_STATE = "expo.beacon.carplay_js_state"
         private const val EXTRA_RETRY_COUNT = "retryCount"
         /** Intent action: enable CarPlay/Android Auto observation in the foreground service. */
         const val ACTION_ENABLE_CARPLAY = "expo.modules.beacon.ENABLE_CARPLAY"
@@ -1067,6 +1142,12 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             setCarPlayEnabled(context, true)
             ensureNotificationChannel(context)
             ensureCarPlayNotificationChannel(context)
+            // Arm the WorkManager watchdog (15-min periodic safety net) and the
+            // AlarmManager loop (~11-min cadence, above the OS quota). Both
+            // call back into this same idempotent entry point if the service
+            // is killed while CarPlay observation is enabled.
+            CarPlayWatchdogWorker.schedule(context)
+            BootReceiver.scheduleCarPlayWatchdogAlarm(context)
             val intent = Intent(context, BeaconForegroundService::class.java)
                 .setAction(ACTION_ENABLE_CARPLAY)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1082,6 +1163,19 @@ class BeaconForegroundService : Service(), BeaconConsumer {
          */
         fun disableCarPlay(context: Context) {
             setCarPlayEnabled(context, false)
+            // Stop the safety-net watchdogs — without this they would keep
+            // restarting the service on every tick.
+            CarPlayWatchdogWorker.cancel(context)
+            BootReceiver.cancelCarPlayWatchdogAlarm(context)
+            // Wipe the monitor's persisted last-known connection so a future
+            // re-enable starts from a clean slate (no stale "was connected"
+            // assumption that would arm the bootstrap-grace re-check).
+            CarPlayMonitor.clearPersistedState(context)
+            // Clear the JS delivery state so a future re-enable starts from a clean slate.
+            try {
+                context.getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE)
+                    .edit().clear().apply()
+            } catch (_: Throwable) {}
             val intent = Intent(context, BeaconForegroundService::class.java)
                 .setAction(ACTION_DISABLE_CARPLAY)
             // Best-effort: if the service isn't running, sending the intent will
@@ -1104,10 +1198,76 @@ class BeaconForegroundService : Service(), BeaconConsumer {
          */
         fun bindModule(module: ExpoBeaconModule?) {
             boundModule = module?.let { java.lang.ref.WeakReference(it) }
+            // When a fresh module attaches to an already-running service, re-emit
+            // the current CarPlay state so the new JS layer is immediately in sync.
+            // Covers the common "app killed while car connected → user reopens app" path.
+            if (module != null) activeService?.reEmitCarPlayStateIfNeeded(module)
         }
 
         fun getMonitoringRuntimeSnapshot(): Map<String, MonitoringRuntimeState> {
             return activeService?.snapshotMonitoringRuntimeState() ?: emptyMap()
+        }
+
+        /**
+         * Returns a snapshot of the current CarPlay / Android Auto connection state.
+         * Reads from the live [CarPlayMonitor] if the foreground service is running,
+         * otherwise falls back to the persisted last-known state.
+         */
+        fun getCarPlayStatus(context: Context): Map<String, Any?> {
+            val monitor = activeService?.carPlayMonitor
+            if (monitor != null && monitor.isObserving()) {
+                val connPayload = monitor.buildConnectedPayload()
+                if (connPayload != null) {
+                    return connPayload + mapOf("connected" to true)
+                }
+                return mapOf("connected" to false)
+            }
+            // Fallback: persisted last-known state (valid even when service is stopped).
+            val connected = try {
+                context.getSharedPreferences("expo_beacon_carplay_monitor", Context.MODE_PRIVATE)
+                    .getBoolean("last_connected", false)
+            } catch (_: Throwable) { false }
+            return mapOf("connected" to connected)
+        }
+
+        /**
+         * Returns a diagnostic snapshot of the CarPlay / Android Auto detection
+         * pipeline. Probes for the host-app AA registration meta-data and the
+         * resolvability of the CarConnection content provider so callers can
+         * tell from JS whether the underlying detection requirements are met.
+         */
+        fun getCarPlayDiagnostics(context: Context): Map<String, Any?> {
+            val pm = context.packageManager
+            // 1) Is the host app declared as an Android-Auto-aware app?
+            val metadataPresent = try {
+                val ai = pm.getApplicationInfo(
+                    context.packageName,
+                    android.content.pm.PackageManager.GET_META_DATA,
+                )
+                ai.metaData?.containsKey("com.google.android.gms.car.application") == true
+            } catch (_: Throwable) { false }
+
+            // 2) Can the system resolve any provider for the CAR_PROVIDER action?
+            //    This combines (a) <queries> visibility on API 30+, and (b) a
+            //    Gearhead / AAOS install that actually advertises the provider.
+            val providerQueryable = try {
+                val intent = Intent("androidx.car.app.connection.action.CAR_PROVIDER")
+                val resolved = pm.queryIntentContentProviders(intent, 0)
+                resolved.isNotEmpty()
+            } catch (_: Throwable) { false }
+
+            val monitor = activeService?.carPlayMonitor
+            val lastRaw: Int? = if (monitor != null && monitor.hasObservedValue) monitor.lastObservedType else null
+            val observerActive = monitor?.isObserving() == true
+            val serviceAlive = activeService != null
+
+            return mapOf(
+                "isCarAppMetadataPresent" to metadataPresent,
+                "isCarProviderQueryable" to providerQueryable,
+                "lastRawConnectionType" to lastRaw,
+                "observerActive" to observerActive,
+                "serviceAlive" to serviceAlive,
+            )
         }
 
         /**
@@ -1259,6 +1419,42 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * Defensive override: when the user swipes the host app away from
+     * Recents, Android delivers `onTaskRemoved` to bound services. Our
+     * service is started via `startForegroundService` with `START_STICKY`
+     * and is intended to keep running independently of the app's task —
+     * specifically so that CarPlay / Android Auto observation and beacon
+     * monitoring continue across swipe-away. We intentionally do NOT call
+     * `stopSelf()` here; the system will redeliver `onStartCommand` on
+     * its own if the process is later reclaimed.
+     *
+    * We also arm a near-term keepalive alarm so devices that tear down the
+    * process on task removal recover before the slower periodic watchdogs run.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val keepAlive = isMonitoringActive(this) || isCarPlayEnabled(this)
+        if (keepAlive) {
+            try {
+                if (isCarPlayEnabled(this)) {
+                    startCarPlayObserverInternal()
+                    CarPlayWatchdogWorker.schedule(this)
+                    BootReceiver.scheduleCarPlayWatchdogAlarm(this)
+                }
+                BootReceiver.scheduleTaskRemovedKeepAlive(this)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Failed to arm task-removed keepalive", t)
+            }
+        }
+        Log.d(
+            TAG,
+            "onTaskRemoved received (monitoring=${isMonitoringActive(this)}, " +
+                "carPlay=${isCarPlayEnabled(this)}, keepAlive=$keepAlive). " +
+                "Service will remain in foreground."
+        )
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun getApplicationContext(): Context = super.getApplicationContext()
 }

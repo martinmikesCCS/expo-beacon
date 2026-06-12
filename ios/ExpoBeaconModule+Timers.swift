@@ -13,6 +13,11 @@ extension ExpoBeaconModule {
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             self.beaconTimeoutTimers.removeValue(forKey: identifier)
+            self.enteredRegions.remove(identifier)
+            self.enterCounters.removeValue(forKey: identifier)
+            self.exitCounters.removeValue(forKey: identifier)
+            self.lastSeenTimes.removeValue(forKey: identifier)
+            self.smoothedDistances.removeValue(forKey: identifier)
             self.sendLoggedEvent("onBeaconTimeout", self.makeBeaconEventParams(identifier: identifier, beacon: beacon, region: region))
             self.postBeaconNotification(identifier: identifier, eventType: "timeout")
         }
@@ -34,6 +39,11 @@ extension ExpoBeaconModule {
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             self.eddystoneTimeoutTimers.removeValue(forKey: identifier)
+            self.eddystoneEnteredRegions.remove(identifier)
+            self.eddystoneEnterCounters.removeValue(forKey: identifier)
+            self.eddystoneExitCounters.removeValue(forKey: identifier)
+            self.eddystoneLatestSeen.removeValue(forKey: identifier)
+            self.smoothedDistances.removeValue(forKey: identifier)
             self.sendLoggedEvent("onEddystoneTimeout", [
                 "identifier": identifier,
                 "namespace": namespace,

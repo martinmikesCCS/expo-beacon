@@ -380,4 +380,36 @@ extension ExpoBeaconModule {
             scanPromise = nil
         }
     }
+
+    /// Response to `locationManager.requestState(for:)` called during `OnCreate`
+    /// after a background process restart. When iOS confirms `.inside`, seed the
+    /// enter counter to ENTER_HYSTERESIS_COUNT − 1 so the very first valid ranging
+    /// reading immediately fires `onBeaconEnter` without accumulating additional
+    /// cycles. When `.outside`, make sure the beacon is not stuck in `enteredRegions`
+    /// from a stale prior session.
+    func handleDidDetermineState(_ state: CLRegionState, for region: CLRegion) {
+        guard let beaconRegion = region as? CLBeaconRegion else { return }
+        let identifier = beaconRegion.identifier
+        switch state {
+        case .inside:
+            // Pre-seed enter counter so the next ranging cycle completes the enter.
+            // Only set it when we have NOT already entered (avoid re-emitting enter).
+            if !enteredRegions.contains(identifier) {
+                enterCounters[identifier] = max(enterCounters[identifier] ?? 0, ENTER_HYSTERESIS_COUNT - 1)
+            }
+        case .outside:
+            // If a stale session left the beacon in entered state, clean it up.
+            if enteredRegions.remove(identifier) != nil {
+                enterCounters.removeValue(forKey: identifier)
+                exitCounters.removeValue(forKey: identifier)
+                smoothedDistances.removeValue(forKey: identifier)
+                sendLoggedEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: beaconRegion, event: "exit"))
+                postBeaconNotification(identifier: identifier, eventType: "exit")
+            }
+        case .unknown:
+            break
+        @unknown default:
+            break
+        }
+    }
 }

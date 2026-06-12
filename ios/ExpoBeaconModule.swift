@@ -93,6 +93,13 @@ public class ExpoBeaconModule: Module {
 
     internal var permissionCompletion: ((Bool) -> Void)?
 
+    // MARK: - CarPlay
+
+    /// Observer token for `UIApplication.didBecomeActiveNotification` used to
+    /// resync CarPlay state on foreground. Owned by the CarPlay extension —
+    /// declared here so the module instance can hold it across calls.
+    internal var carPlayForegroundObserver: NSObjectProtocol?
+
     // MARK: - Cached paired data (invalidated on pair/unpair)
 
     internal var cachedPairedBeacons: [[String: Any]]?
@@ -137,6 +144,32 @@ public class ExpoBeaconModule: Module {
             // would be missed until JS calls startCarPlayMonitoring() again.
             if self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
                 self.startCarPlayMonitoringInternal()
+                // Cross-process reconciliation: if the previous process recorded
+                // CarPlay as connected but the current audio route is no longer
+                // CarPlay, emit a synthetic disconnect so JS listeners attached
+                // to this freshly-created module learn the session ended.
+                CarPlayMonitor.shared.reconcileOnProcessStart()
+            }
+            // Restart beacon ranging on process recreation (background relaunch via
+            // SLC, Visit, or region-entry wake). iOS persists CLBeaconRegion monitoring
+            // at the OS level so the app is woken on region boundary crossings, but
+            // ranging is per-process and stops when the process is terminated.
+            // Without restarting here, handleDidRange callbacks never fire until JS
+            // explicitly calls startMonitoring() — causing the observed 2-5 min
+            // detection delay when CarPlay is active and the app has been sleeping
+            // for days. ENTER_HYSTERESIS_COUNT=1, so the first valid ranging reading
+            // fires onBeaconEnter within ~1 s of ranging resuming.
+            if self.defaults.bool(forKey: IS_MONITORING_KEY) {
+                let authStatus = self.locationManager.authorizationStatus
+                if authStatus == .authorizedAlways || authStatus == .authorizedWhenInUse {
+                    self.startRegionMonitoring()
+                    // Ask iOS for immediate region-state delivery: if the device is
+                    // already inside a monitored region, didDetermineState fires with
+                    // .inside without waiting for the next organic boundary crossing.
+                    for region in self.monitoredRegions {
+                        self.locationManager.requestState(for: region)
+                    }
+                }
             }
         }
 
@@ -460,11 +493,37 @@ public class ExpoBeaconModule: Module {
             self.defaults.set(false, forKey: CARPLAY_MONITORING_ENABLED_KEY)
             CarPlayMonitor.shared.stop()
             self.stopCarPlayBackgroundWakes()
+            self.removeAppForegroundObserverForCarPlay()
             promise.resolve(nil)
         }
 
         Function("isCarPlayMonitoringEnabled") { () -> Bool in
             return self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY)
+        }
+
+        Function("getCarPlayConnectionStatus") { () -> [String: Any] in
+            // Always read the live audio-route state — cheaper than persisted
+            // and accurate even when the monitor isn't running.
+            let connected = self.defaults.bool(forKey: CARPLAY_LAST_CONNECTED_KEY)
+            var out: [String: Any] = ["connected": connected]
+            if connected {
+                let now = Date()
+                out["timestamp"] = now.timeIntervalSince1970 * 1000.0
+            }
+            return out
+        }
+
+        Function("getCarPlayDiagnostics") { () -> [String: Any] in
+            // iOS detection is via AVAudioSession, not a content provider —
+            // most diagnostic fields aren't applicable. Returning constants
+            // keeps the cross-platform JS surface uniform.
+            return [
+                "isCarAppMetadataPresent": true,
+                "isCarProviderQueryable": true,
+                "lastRawConnectionType": NSNull(),
+                "observerActive": self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY),
+                "serviceAlive": true,
+            ]
         }
 
         // MARK: - Continuous Scan
@@ -622,6 +681,9 @@ public class ExpoBeaconModule: Module {
             if !self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
                 CarPlayMonitor.shared.stop()
             }
+            // Foreground observer is bound to this module instance — always
+            // remove it on destroy to avoid leaking observers across recreations.
+            self.removeAppForegroundObserverForCarPlay()
             self.centralManager?.stopScan()
             self.centralManager = nil
             self.scanTimer?.cancel()

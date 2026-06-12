@@ -1,9 +1,10 @@
 import { ConfigPlugin, createRunOncePlugin } from '@expo/config-plugins';
-import withBeaconAndroid from './withBeaconAndroid';
+import withBeaconAndroid, { BeaconAndroidPluginProps } from './withBeaconAndroid';
 import withBeaconIOS, { BeaconIOSPluginProps } from './withBeaconIOS';
 
 export type BeaconPluginProps = {
   ios?: BeaconIOSPluginProps;
+  android?: BeaconAndroidPluginProps;
 };
 
 const withBeaconBGLocation: ConfigPlugin<BeaconPluginProps | void> = (config, props) => {
@@ -19,7 +20,7 @@ const withBeaconBGLocation: ConfigPlugin<BeaconPluginProps | void> = (config, pr
     config = withBeaconIOS(config, opts.ios);
   }
   if (platform !== 'ios') {
-    config = withBeaconAndroid(config);
+    config = withBeaconAndroid(config, opts.android);
   }
 
   return config;

@@ -45,4 +45,12 @@ internal final class LocationDelegate: NSObject, CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
         module?.handleBackgroundWakeForCarPlay()
     }
+
+    // Response to requestState(for:) — called by iOS after a background-process
+    // restart to confirm whether the device is currently inside a monitored
+    // region. Forwarded so the module can log and take action (e.g. emit a
+    // synthetic enter if state is .inside and ranging has not yet delivered data).
+    func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
+        module?.handleDidDetermineState(state, for: region)
+    }
 }

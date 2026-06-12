@@ -12,6 +12,8 @@ import {
   MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
+  CarPlayConnectionStatus,
+  CarPlayDiagnostics,
 } from "./ExpoBeacon.types";
 
 declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
@@ -245,6 +247,27 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * UserDefaults suite on iOS).
    */
   isCarPlayMonitoringEnabled(): boolean;
+
+  /**
+   * Returns a snapshot of the current CarPlay / Android Auto connection state
+   * without waiting for an event. Useful on mount to immediately reflect
+   * whether a car session is already active.
+   *
+   * Reads from the live observer if the foreground service is running, or falls
+   * back to the persisted last-known state otherwise.
+   */
+  getCarPlayConnectionStatus(): CarPlayConnectionStatus;
+
+  /**
+   * Returns diagnostic information about the CarPlay / Android Auto detection
+   * pipeline. Use this when `onCarPlayConnected` never fires despite the head
+   * unit being connected — it reveals whether the host app is correctly
+   * registered with Gearhead, whether the connection content provider is
+   * reachable, and the most recent raw value the observer received.
+   *
+   * See {@link CarPlayDiagnostics} for field-level guidance.
+   */
+  getCarPlayDiagnostics(): CarPlayDiagnostics;
 }
 
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

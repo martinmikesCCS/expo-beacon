@@ -35,6 +35,22 @@ interface EventLogEntry {
   type: "enter" | "exit" | "info";
 }
 
+const formatCarPlayEventDateTime = (
+  timestamp?: number,
+  timestampIso?: string,
+) => {
+  if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+    return new Date(timestamp).toLocaleString();
+  }
+  if (typeof timestampIso === "string") {
+    const parsed = Date.parse(timestampIso);
+    if (!Number.isNaN(parsed)) {
+      return new Date(parsed).toLocaleString();
+    }
+  }
+  return "unknown time";
+};
+
 export default function App() {
   // Scan state
   const [isLiveScanning, setIsLiveScanning] = useState(false);
@@ -77,13 +93,21 @@ export default function App() {
   const logIdRef = useRef(0);
 
   const addLog = useCallback(
-    (message: string, type: EventLogEntry["type"] = "info") => {
+    (
+      message: string,
+      type: EventLogEntry["type"] = "info",
+      occurredAt?: number,
+    ) => {
       const id = String(++logIdRef.current);
+      const entryDate =
+        typeof occurredAt === "number" && Number.isFinite(occurredAt)
+          ? new Date(occurredAt)
+          : new Date();
       setEventLog((prev) =>
         [
           {
             id,
-            timestamp: new Date().toLocaleTimeString(),
+            timestamp: entryDate.toLocaleString(),
             message,
             type,
           },
@@ -187,15 +211,33 @@ export default function App() {
       (event: CarPlayConnectedEvent) => {
         setCarPlayState("connected");
         setCarPlayTransport(event.transport);
-        addLog(`CarPlay CONNECTED (${event.transport})`, "enter");
+        const eventDateTime = formatCarPlayEventDateTime(
+          event.timestamp,
+          event.timestampIso,
+        );
+        addLog(
+          `CarPlay CONNECTED (${event.transport}) at ${eventDateTime}`,
+          "enter",
+          event.timestamp,
+        );
       },
     );
     const disconnectSub = ExpoBeacon.addListener(
       "onCarPlayDisconnected",
-      (_event: CarPlayDisconnectedEvent) => {
+      (event: CarPlayDisconnectedEvent) => {
         setCarPlayState("disconnected");
         setCarPlayTransport("");
-        addLog("CarPlay DISCONNECTED", "exit");
+        const eventDateTime = formatCarPlayEventDateTime(
+          event.timestamp,
+          event.timestampIso,
+        );
+        const reasonSuffix =
+          event.reason === "reconciled" ? " (reconciled)" : "";
+        addLog(
+          `CarPlay DISCONNECTED${reasonSuffix} at ${eventDateTime}`,
+          "exit",
+          event.timestamp,
+        );
       },
     );
     return () => {
@@ -952,7 +994,7 @@ export default function App() {
                 <View key={log.id} style={styles.card}>
                   <Text style={styles.cardTitle}>{log.eventType}</Text>
                   <Text style={styles.cardMeta}>
-                    {new Date(log.timestamp).toLocaleTimeString()}
+                    {new Date(log.timestamp).toLocaleString()}
                     {log.identifier ? ` — ${log.identifier}` : ""}
                   </Text>
                   <Text style={styles.cardMeta} numberOfLines={2}>

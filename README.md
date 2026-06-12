@@ -744,6 +744,50 @@ CarPlay observation is **persistent** — the enabled flag is stored in native p
 - On iOS, if the JS bundle is suspended in the background, the JS event delivery is deferred until the app resumes, but the native lifecycle delegate (used by the geolocation plugin) fires immediately on connect.
 - On Android, when CarPlay monitoring is enabled without beacon monitoring, the foreground service shows a generic "Connected device monitoring active" notification.
 
+**Android Auto registration (automatic via config plugin)**
+
+On Android 14+ — and especially with **wireless Android Auto** — `CarConnection.getType()` silently returns `NOT_CONNECTED` for any app that has not declared itself Android-Auto-aware. The bundled config plugin handles this for you: on the next `expo prebuild` it injects a `com.google.android.gms.car.application` meta-data entry into `AndroidManifest.xml` and writes `res/xml/automotive_app_desc.xml` with `<uses name="template"/>`. No manual native edits are required.
+
+If you need to disable this (e.g. you already ship your own Android Auto template app and don't want a duplicate registration) or you need to declare a different capability than `template`, configure the plugin in your app config:
+
+```json
+{
+  "expo": {
+    "plugins": [
+      ["expo-beacon", {
+        "android": {
+          "androidAuto": {
+            "register": true,
+            "usesName": "template"
+          }
+        }
+      }]
+    ]
+  }
+}
+```
+
+`usesName` accepts any value supported by Android's [`automotiveApp` schema](https://developer.android.com/training/cars/apps#manifest) (`template`, `media`, `notification`, …). Setting `register: false` skips both the meta-data and the resource file.
+
+**Diagnostics**
+
+If `onCarPlayConnected` never fires on Android, call `getCarPlayDiagnostics()` to inspect the native state:
+
+```ts
+const d = await ExpoBeacon.getCarPlayDiagnostics();
+// {
+//   platform: "android",
+//   carPlayEnabled: true,
+//   isCarAppMetadataPresent: true,   // false → config plugin didn't run; prebuild again
+//   isCarProviderQueryable: true,    // false → Android Auto app not installed on device
+//   lastRawConnectionType: 0,        // 0=DISCONNECTED 1=PROJECTION 2=NATIVE
+//   observerActive: true,
+//   serviceAlive: true,
+// }
+```
+
+A response with `isCarAppMetadataPresent: false` indicates the AA registration didn't make it into the built APK — re-run `expo prebuild --clean` to apply the plugin changes.
+
 ---
 
 ## Full API Reference

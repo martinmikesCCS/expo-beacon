@@ -13,6 +13,10 @@ internal let MIN_RSSI_KEY = "expo.beacon.min_rssi"
 internal let EVENT_LEVEL_KEY = "expo.beacon.event_level"
 internal let EXIT_TIMEOUT_SECONDS_KEY = "expo.beacon.exit_timeout_seconds"
 internal let CARPLAY_MONITORING_ENABLED_KEY = "expo.beacon.carplay_monitoring_enabled"
+/// Persisted last-known CarPlay connection state. Used by `CarPlayMonitor` to
+/// reconcile across process recreations (e.g. background-launch wake) and emit
+/// a synthetic `onCarPlayDisconnected` if the route is no longer CarPlay.
+internal let CARPLAY_LAST_CONNECTED_KEY = "expo.beacon.carplay_last_connected"
 
 // MARK: - Tuning thresholds
 
