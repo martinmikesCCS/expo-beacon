@@ -92,7 +92,8 @@ internal class BeaconEventLogger(context: Context) :
                     put("id", it.getLong(0))
                     put("timestamp", it.getLong(1))
                     put("eventType", it.getString(2))
-                    put("identifier", it.getString(3))
+                    // Omit the key entirely for NULL identifiers (matches iOS; the TS type is optional).
+                    if (!it.isNull(3)) put("identifier", it.getString(3))
                     put("data", try {
                         val json = JSONObject(it.getString(4))
                         val map = mutableMapOf<String, Any?>()

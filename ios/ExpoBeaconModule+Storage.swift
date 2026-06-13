@@ -1,6 +1,69 @@
 import Foundation
+import ExpoModulesCore
 
 extension ExpoBeaconModule {
+    // MARK: - Pairing
+
+    func pairBeacon(identifier: String, uuid: String, major: Int, minor: Int, name: String?, timeoutSeconds: Int?) throws {
+        guard UUID(uuidString: uuid) != nil else {
+            throw Exception(name: "INVALID_UUID", description: "Invalid UUID format: \(uuid)")
+        }
+        guard (0...65535).contains(major) else {
+            throw Exception(name: "INVALID_MAJOR", description: "Major must be 0–65535, got \(major)")
+        }
+        guard (0...65535).contains(minor) else {
+            throw Exception(name: "INVALID_MINOR", description: "Minor must be 0–65535, got \(minor)")
+        }
+        // Identifiers are shared across both beacon types (state/smoothing maps
+        // key on them) — reject if a paired Eddystone already uses this one.
+        guard !loadPairedEddystonesRaw().contains(where: { ($0["identifier"] as? String) == identifier }) else {
+            throw Exception(name: "DUPLICATE_IDENTIFIER", description: "Identifier '\(identifier)' is already used by a paired Eddystone")
+        }
+
+        var beacons = loadPairedBeaconsRaw()
+        beacons.removeAll { ($0["identifier"] as? String) == identifier }
+        var entry: [String: Any] = [
+            "identifier": identifier,
+            "uuid": uuid,
+            "major": major,
+            "minor": minor
+        ]
+        if let name = name { entry["name"] = name }
+        if let timeoutSeconds = timeoutSeconds { entry["timeoutSeconds"] = timeoutSeconds }
+        beacons.append(entry)
+        defaults.set(beacons, forKey: PAIRED_BEACONS_KEY)
+        cachedPairedBeacons = nil
+    }
+
+    func pairEddystone(identifier: String, namespace: String, instance: String, name: String?, timeoutSeconds: Int?) throws {
+        guard namespace.count == 20, namespace.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil else {
+            throw Exception(name: "INVALID_NAMESPACE", description: "Namespace must be 20 hex characters, got: \(namespace)")
+        }
+        guard instance.count == 12, instance.range(of: "^[0-9a-fA-F]+$", options: .regularExpression) != nil else {
+            throw Exception(name: "INVALID_INSTANCE", description: "Instance must be 12 hex characters, got: \(instance)")
+        }
+        // Identifiers are shared across both beacon types (state/smoothing maps
+        // key on them) — reject if a paired iBeacon already uses this one.
+        guard !loadPairedBeaconsRaw().contains(where: { ($0["identifier"] as? String) == identifier }) else {
+            throw Exception(name: "DUPLICATE_IDENTIFIER", description: "Identifier '\(identifier)' is already used by a paired beacon")
+        }
+
+        var eddystones = loadPairedEddystonesRaw()
+        eddystones.removeAll { ($0["identifier"] as? String) == identifier }
+        // Normalize hex to lowercase — parseEddystoneFrame produces lowercase,
+        // so stored values must match for monitoring comparisons.
+        var entry: [String: Any] = [
+            "identifier": identifier,
+            "namespace": namespace.lowercased(),
+            "instance": instance.lowercased()
+        ]
+        if let name = name { entry["name"] = name }
+        if let timeoutSeconds = timeoutSeconds { entry["timeoutSeconds"] = timeoutSeconds }
+        eddystones.append(entry)
+        defaults.set(eddystones, forKey: PAIRED_EDDYSTONES_KEY)
+        cachedPairedEddystones = nil
+    }
+
     // MARK: - Paired beacon storage
 
     func loadPairedBeaconsRaw() -> [[String: Any]] {
@@ -79,8 +142,8 @@ extension ExpoBeaconModule {
     // MARK: - UserDefaults migration
 
     func migrateUserDefaultsIfNeeded() {
-        let migrationKey = "expo.beacon.migrated_to_suite_v1"
-        guard !defaults.bool(forKey: migrationKey) else { return }
+        guard !defaults.bool(forKey: SUITE_MIGRATION_FLAG_KEY) else { return }
+        // Only the keys that predate the suite migration — later keys never lived in .standard.
         let keysToMigrate = [
             PAIRED_BEACONS_KEY, PAIRED_EDDYSTONES_KEY,
             IS_MONITORING_KEY, MAX_DISTANCE_KEY, NOTIFICATION_CONFIG_KEY,
@@ -92,6 +155,6 @@ extension ExpoBeaconModule {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
-        defaults.set(true, forKey: migrationKey)
+        defaults.set(true, forKey: SUITE_MIGRATION_FLAG_KEY)
     }
 }

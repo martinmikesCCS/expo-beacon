@@ -1,7 +1,109 @@
 import CoreLocation
-import os.log
+import ExpoModulesCore
+import os
 
 extension ExpoBeaconModule {
+    // MARK: - startMonitoring (option parsing + validation)
+
+    func startMonitoring(options: Either<Double, [String: Any]>?, promise: Promise) {
+        var maxDistance: Double? = nil
+        var exitDistance: Double? = nil
+        var minRssi: Int? = nil
+        var exitTimeoutSecs: Double? = nil
+        var level = "all"
+        var notificationsJson: String? = nil
+        if let dist: Double = options?.get() {
+            maxDistance = dist
+        } else if let map: [String: Any] = options?.get() {
+            maxDistance = map["maxDistance"] as? Double
+            exitDistance = map["exitDistance"] as? Double
+            minRssi = map["minRssi"] as? Int
+            exitTimeoutSecs = map["exitTimeoutSeconds"] as? Double
+            if let lvl = map["level"] as? String, lvl == "events" || lvl == "all" {
+                level = lvl
+            }
+            if let notifications = map["notifications"] as? [String: Any],
+               let data = try? JSONSerialization.data(withJSONObject: notifications),
+               let json = String(data: data, encoding: .utf8) {
+                notificationsJson = json
+            }
+        }
+        if let dist = maxDistance, (!dist.isFinite || dist <= 0) {
+            rejectAndEmit(promise, "INVALID_MAX_DISTANCE", "maxDistance must be a finite number greater than 0")
+            return
+        }
+        if let exitDist = exitDistance, (!exitDist.isFinite || exitDist <= 0) {
+            rejectAndEmit(promise, "INVALID_EXIT_DISTANCE", "exitDistance must be a finite number greater than 0")
+            return
+        }
+        if exitDistance != nil && maxDistance == nil {
+            rejectAndEmit(promise, "INVALID_EXIT_DISTANCE", "exitDistance requires maxDistance to be set")
+            return
+        }
+        if let dist = maxDistance, let exitDist = exitDistance, exitDist < dist {
+            rejectAndEmit(promise, "INVALID_EXIT_DISTANCE", "exitDistance must be greater than or equal to maxDistance")
+            return
+        }
+        if let t = exitTimeoutSecs, (!t.isFinite || t <= 0) {
+            rejectAndEmit(promise, "INVALID_EXIT_TIMEOUT", "exitTimeoutSeconds must be a finite number greater than 0")
+            return
+        }
+        // Persist only after validation passes. Both call shapes (legacy number
+        // and options map) reset the same keys so they leave consistent state.
+        self.eventLevel = level
+        defaults.set(level, forKey: EVENT_LEVEL_KEY)
+        if let json = notificationsJson {
+            defaults.set(json, forKey: NOTIFICATION_CONFIG_KEY)
+        }
+        if let dist = maxDistance {
+            defaults.set(dist, forKey: MAX_DISTANCE_KEY)
+        } else {
+            defaults.removeObject(forKey: MAX_DISTANCE_KEY)
+        }
+        if let exitDist = exitDistance {
+            defaults.set(exitDist, forKey: EXIT_DISTANCE_KEY)
+        } else {
+            defaults.removeObject(forKey: EXIT_DISTANCE_KEY)
+        }
+        if let rssi = minRssi {
+            defaults.set(rssi, forKey: MIN_RSSI_KEY)
+            minRssiThreshold = rssi
+        } else {
+            defaults.removeObject(forKey: MIN_RSSI_KEY)
+            minRssiThreshold = DEFAULT_MIN_RSSI
+        }
+        if let t = exitTimeoutSecs {
+            defaults.set(t, forKey: EXIT_TIMEOUT_SECONDS_KEY)
+            exitTimeoutSeconds = t
+        } else {
+            defaults.removeObject(forKey: EXIT_TIMEOUT_SECONDS_KEY)
+            exitTimeoutSeconds = DEFAULT_EXIT_TIMEOUT_SECONDS
+        }
+        requestLocationPermission { granted in
+            guard granted else {
+                self.rejectAndEmit(promise, "PERMISSION_DENIED", "Location permission required for monitoring")
+                return
+            }
+            // Request Always authorization non-blockingly for background support.
+            // On iOS 13+ requestAlwaysAuthorization() from WhenInUse may be a
+            // no-op if the user already made their choice — don't block on it.
+            if self.locationManager.authorizationStatus != .authorizedAlways {
+                self.locationManager.requestAlwaysAuthorization()
+            }
+            self.requestNotificationPermission()
+            self.startRegionMonitoring()
+            // Persist the monitoring flag only after permission was granted so a
+            // PERMISSION_DENIED rejection doesn't leave isMonitoring=true behind.
+            self.defaults.set(true, forKey: IS_MONITORING_KEY)
+            // Auto-enable CarPlay monitoring when beacon monitoring starts so
+            // CarPlay events are captured for the same lifetime as beacons.
+            // Users can opt out at any time via stopCarPlayMonitoring().
+            self.defaults.set(true, forKey: CARPLAY_MONITORING_ENABLED_KEY)
+            self.startCarPlayMonitoringInternal()
+            promise.resolve(nil)
+        }
+    }
+
     // MARK: - Region monitoring lifecycle
 
     func startRegionMonitoring() {
@@ -20,6 +122,11 @@ extension ExpoBeaconModule {
         } else {
             exitTimeoutSeconds = DEFAULT_EXIT_TIMEOUT_SECONDS
         }
+
+        // Cache distance thresholds so ranging callbacks and BLE advertisements
+        // don't re-read UserDefaults on every reading
+        maxDistanceThreshold = defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
+        exitDistanceThreshold = defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
 
         let beacons = loadPairedBeaconsRaw()
 
@@ -102,7 +209,7 @@ extension ExpoBeaconModule {
     /// value instead of rejecting it — this ensures distance events keep flowing when the
     /// user moves away from a beacon, rather than freezing because the EMA is stuck at the
     /// old close-range value and every new far-range reading is rejected.
-    func smoothDistance(identifier: String, rawDistance: Double) -> Double? {
+    func smoothDistance(identifier: String, rawDistance: Double) -> Double {
         guard let prev = smoothedDistances[identifier] else {
             smoothedDistances[identifier] = rawDistance
             return rawDistance
@@ -233,11 +340,11 @@ extension ExpoBeaconModule {
                 // When maxDistance is set, distance thresholds control transitions.
                 // When maxDistance is nil, pure presence-based hysteresis is used
                 // (ENTER_HYSTERESIS_COUNT consecutive readings to confirm enter).
-                let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
-                let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
+                let maxDist = maxDistanceThreshold
+                let exitDist = exitDistanceThreshold
 
                 // Apply EMA smoothing; jump resets EMA to the new value
-                let smoothed = smoothDistance(identifier: identifier, rawDistance: beacon.accuracy)!
+                let smoothed = smoothDistance(identifier: identifier, rawDistance: beacon.accuracy)
 
                 let action = evaluateDistanceHysteresis(
                     identifier: identifier,
@@ -351,7 +458,8 @@ extension ExpoBeaconModule {
 
     func handleMonitoringDidFail(for region: CLRegion?, withError error: Error) {
         let id = region?.identifier ?? "unknown"
-        Logger(subsystem: "expo.modules.beacon", category: "monitoring")
+        // Qualified — ExpoModulesCore also exports a `Logger` type.
+        os.Logger(subsystem: "expo.modules.beacon", category: "monitoring")
             .error("Monitoring failed for region \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
         sendLoggedEvent("onBeaconError", [
             "identifier": id,
@@ -370,6 +478,9 @@ extension ExpoBeaconModule {
 
         // If a one-shot scan is active and this constraint belongs to it, reject the promise
         if scanPromise != nil && scanConstraints.contains(where: { $0 == constraint }) {
+            // Disarm the scan timer so it cannot prematurely resolve a future scan
+            scanTimer?.cancel()
+            scanTimer = nil
             // Stop all scan constraints
             for sc in scanConstraints {
                 locationManager.stopRangingBeacons(satisfying: sc)

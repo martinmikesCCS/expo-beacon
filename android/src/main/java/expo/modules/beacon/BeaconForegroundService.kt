@@ -75,6 +75,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     // in quick succession during activity lifecycle transitions (e.g. onHostPause → onHostResume),
     // which would otherwise stop and restart all AltBeacon regions within milliseconds.
     @Volatile private var lastLoadRegionsMs: Long = 0L
+    // Set while a trailing-edge loadAndMonitorRegions() re-run is queued on timeoutHandler.
+    @Volatile private var pendingLoadRegions = false
 
     // Distance logging
     private val distanceLogRegions = java.util.concurrent.CopyOnWriteArraySet<Region>()
@@ -104,8 +106,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     override fun onCreate() {
         super.onCreate()
         activeService = this
-        createNotificationChannel()
-        createCarPlayNotificationChannel()
+        ensureNotificationChannel(this)
+        ensureCarPlayNotificationChannel(this)
         apiForwarder = BeaconApiForwarder(this)
         beaconManager = BeaconManager.getInstanceForApplication(this).also { manager ->
             BeaconParsers.ensureRegistered(manager)
@@ -187,6 +189,14 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                     return START_NOT_STICKY
                 }
             }
+            ACTION_DISABLE_MONITORING -> {
+                // stopMonitoring() while CarPlay observation is still enabled —
+                // stop all beacon scanning but keep the service alive. The
+                // startForeground call above already rebuilt the notification
+                // as CarPlay-only (the monitoring flag was cleared by stop()).
+                disableMonitoringInternal()
+                return START_STICKY
+            }
         }
         if (serviceConnected) {
             // Already bound from a prior onStartCommand — reload regions directly
@@ -238,29 +248,50 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     }
 
     override fun onBeaconServiceConnect() {
+        if (!isMonitoringActive(this)) {
+            // stopMonitoring() raced the AltBeacon bind — drop the connection
+            // instead of arming regions that were just disabled.
+            try { beaconManager.unbind(this) } catch (_: Throwable) {}
+            return
+        }
         serviceConnected = true
-        // Read max distance, exit distance, and min RSSI from options prefs
-        val optPrefs = getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
-        maxDistance = optPrefs.getString("max_distance", null)?.toDoubleOrNull()
-        exitDistance = optPrefs.getString("exit_distance", null)?.toDoubleOrNull()
-        minRssiThreshold = optPrefs.getInt("min_rssi", DEFAULT_MIN_RSSI)
-        eventLevel = optPrefs.getString("level", "all") ?: "all"
-        exitTimeoutMs = ((optPrefs.getString("exit_timeout_seconds", null)?.toDoubleOrNull() ?: DEFAULT_EXIT_TIMEOUT_SECONDS) * 1000.0).toLong()
-
         beaconManager.addMonitorNotifier(monitorNotifier)
         beaconManager.addRangeNotifier(rangeNotifier)
         beaconManager.addRangeNotifier(distanceLoggingRangeNotifier)
         loadAndMonitorRegions()
     }
 
+    /**
+     * (Re-)read monitoring options from prefs. Called on every region load so a
+     * second startMonitoring on a live bound service picks up new options.
+     */
+    private fun applyMonitoringOptions() {
+        val optPrefs = getSharedPreferences(MONITORING_OPTIONS_PREFS, Context.MODE_PRIVATE)
+        maxDistance = optPrefs.getString(MONITORING_OPT_MAX_DISTANCE, null)?.toDoubleOrNull()
+        exitDistance = optPrefs.getString(MONITORING_OPT_EXIT_DISTANCE, null)?.toDoubleOrNull()
+        minRssiThreshold = optPrefs.getInt(MONITORING_OPT_MIN_RSSI, DEFAULT_MIN_RSSI)
+        eventLevel = optPrefs.getString(MONITORING_OPT_LEVEL, "all") ?: "all"
+        exitTimeoutMs = ((optPrefs.getString(MONITORING_OPT_EXIT_TIMEOUT_SECONDS, null)?.toDoubleOrNull() ?: DEFAULT_EXIT_TIMEOUT_SECONDS) * 1000.0).toLong()
+    }
+
     private fun loadAndMonitorRegions() {
+        applyMonitoringOptions()
         val now = android.os.SystemClock.elapsedRealtime()
         val elapsed = now - lastLoadRegionsMs
         if (elapsed < LOAD_REGIONS_DEBOUNCE_MS) {
-            Log.d(TAG, "loadAndMonitorRegions: skipping duplicate call (${elapsed}ms after last load)")
+            // Trailing-edge re-run so a debounced call is deferred, not dropped.
+            if (!pendingLoadRegions) {
+                pendingLoadRegions = true
+                timeoutHandler.postDelayed({
+                    pendingLoadRegions = false
+                    loadAndMonitorRegions()
+                }, LOAD_REGIONS_DEBOUNCE_MS - elapsed)
+            }
+            Log.d(TAG, "loadAndMonitorRegions: debounced (${elapsed}ms after last load) — re-running on trailing edge")
             return
         }
         lastLoadRegionsMs = now
+        pendingLoadRegions = false
 
         val prefs: SharedPreferences = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val json = prefs.getString(PREFS_KEY, "[]") ?: "[]"
@@ -456,7 +487,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
     // Single source of truth for distance-based enter/exit with hysteresis.
     // Processes only actual monitoring regions and handles exit via miss counting
-    // when beacons disappear.
+    // when beacons disappear. State transitions are computed under distanceLock;
+    // the slow side effects (SQLite insert, API enqueue, broadcast, notification)
+    // run after the lock is released.
     private val rangeNotifier = RangeNotifier { beacons, region ->
         val maxDist = maxDistance
         if (!monitoredRegionIds.contains(region.uniqueId)) return@RangeNotifier
@@ -465,6 +498,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             .filter { it.distance >= 0 && it.rssi >= minRssiThreshold }
             .minByOrNull { it.distance }
 
+        // Pending transition to emit after the lock is released: (eventType, distance, rssi).
+        var pendingEvent: Triple<String, Double, Int>? = null
         synchronized(distanceLock) {
             if (beacon != null) {
                 // Got a valid reading — reset miss counter
@@ -476,22 +511,14 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                 // Apply EMA smoothing; jump resets EMA to the new value
                 val smoothed = smoothDistance(region.uniqueId, beacon.distance)
 
-                val action = evaluateDistanceHysteresis(region.uniqueId, smoothed, maxDist)
-                when (action) {
+                when (evaluateDistanceHysteresis(region.uniqueId, smoothed, maxDist)) {
                     HysteresisAction.ENTER -> {
                         enteredRegions.add(region.uniqueId)
-                        sendBeaconBroadcast(region, "enter", beacon.distance, beacon.rssi)
-                        showEnterExitNotification(region, "enter")
-                        // Beacon returned — cancel any running timeout timer.
-                        cancelTimeout(region.uniqueId)
+                        pendingEvent = Triple("enter", beacon.distance, beacon.rssi)
                     }
                     HysteresisAction.EXIT -> {
                         enteredRegions.remove(region.uniqueId)
-                        sendBeaconBroadcast(region, "exit", beacon.distance, beacon.rssi)
-                        showEnterExitNotification(region, "exit")
-                        // Beacon left — cancel inactivity timer and start the timeout clock.
-                        cancelInactivity(region.uniqueId)
-                        scheduleTimeoutIfConfigured(region)
+                        pendingEvent = Triple("exit", beacon.distance, beacon.rssi)
                     }
                     HysteresisAction.NONE -> {}
                 }
@@ -515,12 +542,21 @@ class BeaconForegroundService : Service(), BeaconConsumer {
                     missCounters[region.uniqueId] = 0
                     enterCounters[region.uniqueId] = 0
                     exitCounters[region.uniqueId] = 0
-                    sendBeaconBroadcast(region, "exit", -1.0)
-                    showEnterExitNotification(region, "exit")
-                    // Beacon disappeared — cancel inactivity timer and start the timeout clock.
-                    cancelInactivity(region.uniqueId)
-                    scheduleTimeoutIfConfigured(region)
+                    pendingEvent = Triple("exit", -1.0, 0)
                 }
+            }
+        }
+
+        pendingEvent?.let { (eventType, distance, rssi) ->
+            sendBeaconBroadcast(region, eventType, distance, rssi)
+            showEnterExitNotification(region, eventType)
+            if (eventType == "enter") {
+                // Beacon returned — cancel any running timeout timer.
+                cancelTimeout(region.uniqueId)
+            } else {
+                // Beacon left — cancel inactivity timer and start the timeout clock.
+                cancelInactivity(region.uniqueId)
+                scheduleTimeoutIfConfigured(region)
             }
         }
     }
@@ -663,36 +699,34 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         // Eddystone regions have id1 as a hex namespace (not a UUID)
         val id1Str = region.id1?.toString() ?: ""
         val isEddystone = id1Str.startsWith("0x")
+        val eventName = monitoringEventName(isEddystone, eventType) ?: return
 
-        val params = if (isEddystone) {
-            buildMap<String, Any?> {
-                put("identifier", region.uniqueId)
+        // Single payload shared by the SQLite log, the API forwarder, and the
+        // JS broadcast. "event" is part of the public payload for enter/exit
+        // only — distance and timeout omit it (matches the TS types and iOS).
+        val params = buildMap<String, Any?> {
+            put("identifier", region.uniqueId)
+            if (isEddystone) {
                 put("namespace", id1Str.removePrefix("0x"))
                 put("instance", region.id2?.toString()?.removePrefix("0x") ?: "")
-                put("event", eventType)
-                put("distance", distance)
-                put("rssi", rssi)
-            }
-        } else {
-            buildMap<String, Any?> {
-                put("identifier", region.uniqueId)
-                put("uuid", id1Str)
+            } else {
+                put("uuid", id1Str.uppercase())
                 put("major", region.id2?.toInt() ?: 0)
                 put("minor", region.id3?.toInt() ?: 0)
-                put("event", eventType)
-                put("distance", distance)
-                put("rssi", rssi)
             }
+            if (eventType == "enter" || eventType == "exit") put("event", eventType)
+            put("distance", distance)
+            put("rssi", rssi)
         }
-        monitoringEventName(isEddystone, eventType)?.let { logBeaconEvent(it, params) }
+        logBeaconEvent(eventName, params)
 
         // Forward all produced events to remote API
-        apiForwarder?.forwardEvent(params)
+        apiForwarder?.forwardEvent(params, eventName)
 
         // Dispatch enter/exit/timeout to registered plugins (e.g. to start/stop BGLocation)
         if (eventType == "enter" || eventType == "exit" || eventType == "timeout") {
             val identifier = region.uniqueId
-            val uuid = if (!isEddystone) id1Str else ""
+            val uuid = if (!isEddystone) id1Str.uppercase() else ""
             val major = if (!isEddystone) region.id2?.toInt() ?: 0 else 0
             val minor = if (!isEddystone) region.id3?.toInt() ?: 0 else 0
             val namespace = if (isEddystone) id1Str.removePrefix("0x") else ""
@@ -704,40 +738,34 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             }
         }
 
-        val intent = Intent(ACTION_BEACON_EVENT).apply {
-            putExtra("identifier", region.uniqueId)
-            putExtra("event", eventType)
-            putExtra("distance", distance)
-            putExtra("rssi", rssi)
-            if (isEddystone) {
-                putExtra("beaconType", "eddystone")
-                putExtra("namespace", id1Str.removePrefix("0x"))
-                putExtra("instance", region.id2?.toString()?.removePrefix("0x") ?: "")
-            } else {
-                putExtra("beaconType", "ibeacon")
-                putExtra("uuid", id1Str)
-                putExtra("major", region.id2?.toInt() ?: 0)
-                putExtra("minor", region.id3?.toInt() ?: 0)
-            }
-            setPackage(packageName)
-        }
         // Scoped system broadcast — see BeaconEventReceiver.kt for architecture rationale.
-        sendBroadcast(intent)
+        sendEventBroadcast(eventName, params)
     }
 
     private fun sendErrorBroadcast(identifier: String?, code: String, message: String) {
         val params = buildMap<String, Any?> {
             put("identifier", identifier ?: "")
-            put("event", "error")
             put("code", code)
             put("message", message)
         }
         logBeaconEvent("onBeaconError", params)
+        sendEventBroadcast("onBeaconError", params)
+    }
+
+    /** Pack the resolved JS event name + payload into one intent for [BeaconEventReceiver]. */
+    private fun sendEventBroadcast(eventName: String, params: Map<String, Any?>) {
+        val bundle = android.os.Bundle()
+        for ((key, value) in params) {
+            when (value) {
+                is String -> bundle.putString(key, value)
+                is Int -> bundle.putInt(key, value)
+                is Double -> bundle.putDouble(key, value)
+                is Boolean -> bundle.putBoolean(key, value)
+            }
+        }
         val intent = Intent(ACTION_BEACON_EVENT).apply {
-            putExtra("identifier", identifier ?: "")
-            putExtra("event", "error")
-            putExtra("errorCode", code)
-            putExtra("errorMessage", message)
+            putExtra(EXTRA_EVENT_NAME, eventName)
+            putExtra(EXTRA_EVENT_PARAMS, bundle)
             setPackage(packageName)
         }
         sendBroadcast(intent)
@@ -797,14 +825,22 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             .replace("{identifier}", region.uniqueId)
             .replace("{event}", eventType)
 
-        val iconName = eventsConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
-        val iconResId = iconName?.let { name ->
-            try { resources.getIdentifier(name, "drawable", packageName).takeIf { it != 0 } }
-            catch (_: Exception) { null }
-        } ?: android.R.drawable.ic_dialog_info
+        val notifId = notifIdMap.computeIfAbsent(region.uniqueId) {
+            ENTER_EXIT_NOTIF_BASE_ID + notifIdCounter.getAndIncrement()
+        }
+        postEventNotification(CHANNEL_ID, eventsConfig, title, message, notifId)
+    }
 
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(iconResId)
+    /** Build and post a user-facing event notification; silently skipped without POST_NOTIFICATIONS. */
+    private fun postEventNotification(
+        channelId: String,
+        eventsConfig: org.json.JSONObject?,
+        title: String,
+        message: String,
+        notifId: Int
+    ) {
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(resolveIconRes(this, eventsConfig))
             .setContentTitle(title)
             .setContentText(message)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -812,9 +848,6 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             .build()
 
         try {
-            val notifId = notifIdMap.computeIfAbsent(region.uniqueId) {
-                ENTER_EXIT_NOTIF_BASE_ID + notifIdCounter.getAndIncrement()
-            }
             NotificationManagerCompat.from(this).notify(notifId, notification)
         } catch (_: SecurityException) {
             // POST_NOTIFICATIONS not granted — silently skip notification
@@ -892,13 +925,13 @@ class BeaconForegroundService : Service(), BeaconConsumer {
     // MARK: - JS delivery state helpers
 
     private fun readJsConnected(): Boolean =
-        try { getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE).getBoolean("js_connected", false) }
+        try { getSharedPreferences(CARPLAY_JS_STATE_PREFS, Context.MODE_PRIVATE).getBoolean(CARPLAY_JS_STATE_KEY, false) }
         catch (_: Throwable) { false }
 
     private fun writeJsConnected(connected: Boolean) {
         try {
-            getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE)
-                .edit().putBoolean("js_connected", connected).apply()
+            getSharedPreferences(CARPLAY_JS_STATE_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(CARPLAY_JS_STATE_KEY, connected).apply()
         } catch (_: Throwable) {}
     }
 
@@ -924,7 +957,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             Log.w(TAG, "CarPlay log write failed", e)
         }
         // Remote API forwarder (no-op if unconfigured).
-        try { apiForwarder?.forwardEvent(payload) } catch (_: Throwable) {}
+        try { apiForwarder?.forwardEvent(payload, eventName) } catch (_: Throwable) {}
         // Native plugin registry (BeaconGeoPlugin etc.).
         when (eventName) {
             "onCarPlayConnected" -> BeaconPluginRegistry.dispatchCarPlayConnected(
@@ -972,78 +1005,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             .replace("{event}", eventType)
             .replace("{transport}", transport ?: "")
 
-        val iconName = eventsConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
-        val iconResId = iconName?.let { name ->
-            try { resources.getIdentifier(name, "drawable", packageName).takeIf { it != 0 } }
-            catch (_: Exception) { null }
-        } ?: android.R.drawable.ic_dialog_info
-
-        val notification = NotificationCompat.Builder(this, CARPLAY_CHANNEL_ID)
-            .setSmallIcon(iconResId)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .build()
-
         val notifId = if (eventType == "connected") CARPLAY_CONNECTED_NOTIF_ID
                       else CARPLAY_DISCONNECTED_NOTIF_ID
-        try {
-            NotificationManagerCompat.from(this).notify(notifId, notification)
-        } catch (_: SecurityException) {
-            // POST_NOTIFICATIONS not granted — silently skip notification
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val config = readNotificationConfig()
-            val channelConfig = config.optJSONObject("channel")
-
-            val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
-                ?: "Beacon Monitoring"
-            val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
-                ?: "Used for background iBeacon region monitoring"
-            val importance = when (channelConfig?.optString("importance")) {
-                "high" -> NotificationManager.IMPORTANCE_HIGH
-                "default" -> NotificationManager.IMPORTANCE_DEFAULT
-                else -> NotificationManager.IMPORTANCE_LOW
-            }
-
-            val notifMgr = getSystemService(NotificationManager::class.java)
-            // Only create channel if it doesn't exist yet — preserves user notification preferences
-            if (notifMgr?.getNotificationChannel(CHANNEL_ID) == null) {
-                val channel = NotificationChannel(CHANNEL_ID, channelName, importance).apply {
-                    description = channelDesc
-                }
-                notifMgr?.createNotificationChannel(channel)
-            }
-        }
-    }
-
-    private fun createCarPlayNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val config = readNotificationConfig()
-            val channelConfig = config.optJSONObject("carPlayChannel")
-
-            val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
-                ?: "CarPlay / Android Auto"
-            val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
-                ?: "CarPlay and Android Auto connect/disconnect notifications"
-            val importance = when (channelConfig?.optString("importance")) {
-                "high" -> NotificationManager.IMPORTANCE_HIGH
-                "low" -> NotificationManager.IMPORTANCE_LOW
-                else -> NotificationManager.IMPORTANCE_DEFAULT
-            }
-
-            val notifMgr = getSystemService(NotificationManager::class.java)
-            if (notifMgr?.getNotificationChannel(CARPLAY_CHANNEL_ID) == null) {
-                val channel = NotificationChannel(CARPLAY_CHANNEL_ID, channelName, importance).apply {
-                    description = channelDesc
-                }
-                notifMgr?.createNotificationChannel(channel)
-            }
-        }
+        postEventNotification(CARPLAY_CHANNEL_ID, eventsConfig, title, message, notifId)
     }
 
     private fun buildForegroundNotification(): Notification {
@@ -1068,15 +1032,13 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         /** If raw distance differs from smoothed by more than this factor, treat as outlier. */
         const val DISTANCE_JUMP_FACTOR = 5.0
 
-        private const val PREF_IS_MONITORING = "expo.beacon.is_monitoring"
-        private const val PREF_CARPLAY_ENABLED = "expo.beacon.carplay_enabled"
-        /** Tracks what the JS layer last received — used for reconciled-disconnect on module rebind. */
-        private const val PREF_CARPLAY_JS_STATE = "expo.beacon.carplay_js_state"
         private const val EXTRA_RETRY_COUNT = "retryCount"
         /** Intent action: enable CarPlay/Android Auto observation in the foreground service. */
         const val ACTION_ENABLE_CARPLAY = "expo.modules.beacon.ENABLE_CARPLAY"
         /** Intent action: disable CarPlay/Android Auto observation. Stops the service if no other reason to run. */
         const val ACTION_DISABLE_CARPLAY = "expo.modules.beacon.DISABLE_CARPLAY"
+        /** Intent action: stop beacon ranging/monitoring while keeping the service alive for CarPlay. */
+        const val ACTION_DISABLE_MONITORING = "expo.modules.beacon.DISABLE_MONITORING"
         private const val MAX_STARTFOREGROUND_RETRIES = 3
         private const val RETRY_DELAY_MS = 10_000L
         private const val RETRY_SERVICE_REQUEST_CODE = 0x42454143 // "BEAC"
@@ -1087,8 +1049,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         @Volatile private var boundModule: java.lang.ref.WeakReference<ExpoBeaconModule>? = null
 
         fun start(context: Context) {
-            context.getSharedPreferences(PREF_IS_MONITORING, Context.MODE_PRIVATE)
-                .edit().putBoolean("active", true).apply()
+            context.getSharedPreferences(MONITORING_ACTIVE_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(MONITORING_ACTIVE_KEY, true).apply()
             ensureNotificationChannel(context)
             ensureCarPlayNotificationChannel(context)
             val intent = Intent(context, BeaconForegroundService::class.java)
@@ -1100,20 +1062,33 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         }
 
         fun stop(context: Context) {
-            context.getSharedPreferences(PREF_IS_MONITORING, Context.MODE_PRIVATE)
-                .edit().putBoolean("active", false).apply()
+            context.getSharedPreferences(MONITORING_ACTIVE_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(MONITORING_ACTIVE_KEY, false).apply()
             // Keep the service alive if it's still needed for CarPlay observation;
             // otherwise the user would silently lose CarPlay events when calling
             // stopMonitoring() while CarPlay monitoring was independently enabled.
+            // The running service must still be told to stop scanning, so send
+            // an explicit disable-monitoring action instead of returning silently.
+            // A dead service has nothing to stop — the cleared flag alone keeps a
+            // future cold start in CarPlay-only mode.
             if (isCarPlayEnabled(context)) {
+                if (activeService != null) {
+                    val intent = Intent(context, BeaconForegroundService::class.java)
+                        .setAction(ACTION_DISABLE_MONITORING)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                }
                 return
             }
             context.stopService(Intent(context, BeaconForegroundService::class.java))
         }
 
         fun isMonitoringActive(context: Context): Boolean {
-            return context.getSharedPreferences(PREF_IS_MONITORING, Context.MODE_PRIVATE)
-                .getBoolean("active", false)
+            return context.getSharedPreferences(MONITORING_ACTIVE_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(MONITORING_ACTIVE_KEY, false)
         }
 
         // MARK: - CarPlay public API
@@ -1124,13 +1099,13 @@ class BeaconForegroundService : Service(), BeaconConsumer {
          * the observer automatically.
          */
         internal fun setCarPlayEnabled(context: Context, enabled: Boolean) {
-            context.getSharedPreferences(PREF_CARPLAY_ENABLED, Context.MODE_PRIVATE)
-                .edit().putBoolean("enabled", enabled).apply()
+            context.getSharedPreferences(CARPLAY_ENABLED_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(CARPLAY_ENABLED_KEY, enabled).apply()
         }
 
         fun isCarPlayEnabled(context: Context): Boolean {
-            return context.getSharedPreferences(PREF_CARPLAY_ENABLED, Context.MODE_PRIVATE)
-                .getBoolean("enabled", false)
+            return context.getSharedPreferences(CARPLAY_ENABLED_PREFS, Context.MODE_PRIVATE)
+                .getBoolean(CARPLAY_ENABLED_KEY, false)
         }
 
         /**
@@ -1173,7 +1148,7 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             CarPlayMonitor.clearPersistedState(context)
             // Clear the JS delivery state so a future re-enable starts from a clean slate.
             try {
-                context.getSharedPreferences(PREF_CARPLAY_JS_STATE, Context.MODE_PRIVATE)
+                context.getSharedPreferences(CARPLAY_JS_STATE_PREFS, Context.MODE_PRIVATE)
                     .edit().clear().apply()
             } catch (_: Throwable) {}
             val intent = Intent(context, BeaconForegroundService::class.java)
@@ -1224,8 +1199,8 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             }
             // Fallback: persisted last-known state (valid even when service is stopped).
             val connected = try {
-                context.getSharedPreferences("expo_beacon_carplay_monitor", Context.MODE_PRIVATE)
-                    .getBoolean("last_connected", false)
+                context.getSharedPreferences(CarPlayMonitor.CARPLAY_MONITOR_PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(CarPlayMonitor.KEY_LAST_CONNECTED, false)
             } catch (_: Throwable) { false }
             return mapOf("connected" to connected)
         }
@@ -1270,79 +1245,88 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             )
         }
 
+        /** Read the persisted notification config JSON; empty object when unset or malformed. */
+        internal fun readNotificationConfig(context: Context): org.json.JSONObject {
+            val json = context.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
+                .getString(NOTIFICATION_CONFIG_KEY, null) ?: return org.json.JSONObject()
+            return try { org.json.JSONObject(json) } catch (_: Exception) { org.json.JSONObject() }
+        }
+
+        /** Resolve the configured small-icon drawable from [config], falling back to a stock icon. */
+        private fun resolveIconRes(context: Context, config: org.json.JSONObject?): Int {
+            val iconName = config?.optString("icon")?.takeIf { it.isNotEmpty() }
+            return iconName?.let { name ->
+                try { context.resources.getIdentifier(name, "drawable", context.packageName).takeIf { it != 0 } }
+                catch (_: Exception) { null }
+            } ?: android.R.drawable.ic_dialog_info
+        }
+
+        private fun ensureChannel(
+            context: Context,
+            channelId: String,
+            configKey: String,
+            defaultName: String,
+            defaultDescription: String,
+            fallbackImportance: Int
+        ) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val channelConfig = readNotificationConfig(context).optJSONObject(configKey)
+
+            val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
+                ?: defaultName
+            val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
+                ?: defaultDescription
+            val importance = when (channelConfig?.optString("importance")) {
+                "high" -> NotificationManager.IMPORTANCE_HIGH
+                "default" -> NotificationManager.IMPORTANCE_DEFAULT
+                "low" -> NotificationManager.IMPORTANCE_LOW
+                else -> fallbackImportance
+            }
+
+            val notifMgr = context.getSystemService(NotificationManager::class.java)
+            // Only create channel if it doesn't exist yet — preserves user notification preferences
+            if (notifMgr?.getNotificationChannel(channelId) == null) {
+                val channel = NotificationChannel(channelId, channelName, importance).apply {
+                    description = channelDesc
+                }
+                notifMgr?.createNotificationChannel(channel)
+            }
+        }
+
         /**
          * Ensure the notification channel exists. Must be called before building
          * a notification from a non-service context (e.g. ExpoBeaconModule).
          */
-        fun ensureNotificationChannel(context: Context) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val json = context.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
-                    .getString("config", null)
-                val config = try { org.json.JSONObject(json ?: "") } catch (_: Exception) { org.json.JSONObject() }
-                val channelConfig = config.optJSONObject("channel")
-
-                val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
-                    ?: "Beacon Monitoring"
-                val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
-                    ?: "Used for background iBeacon region monitoring"
-                val importance = when (channelConfig?.optString("importance")) {
-                    "high" -> NotificationManager.IMPORTANCE_HIGH
-                    "default" -> NotificationManager.IMPORTANCE_DEFAULT
-                    else -> NotificationManager.IMPORTANCE_LOW
-                }
-
-                val notifMgr = context.getSystemService(NotificationManager::class.java)
-                if (notifMgr?.getNotificationChannel(CHANNEL_ID) == null) {
-                    val channel = NotificationChannel(CHANNEL_ID, channelName, importance).apply {
-                        description = channelDesc
-                    }
-                    notifMgr?.createNotificationChannel(channel)
-                }
-            }
-        }
+        fun ensureNotificationChannel(context: Context) = ensureChannel(
+            context,
+            CHANNEL_ID,
+            "channel",
+            "Beacon Monitoring",
+            "Used for background iBeacon region monitoring",
+            NotificationManager.IMPORTANCE_LOW
+        )
 
         /**
          * Ensure the CarPlay notification channel exists. Mirrors
          * [ensureNotificationChannel] for the dedicated CarPlay channel so that
          * users can mute CarPlay notifications independently in system settings.
          */
-        fun ensureCarPlayNotificationChannel(context: Context) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val json = context.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
-                    .getString("config", null)
-                val config = try { org.json.JSONObject(json ?: "") } catch (_: Exception) { org.json.JSONObject() }
-                val channelConfig = config.optJSONObject("carPlayChannel")
-
-                val channelName = channelConfig?.optString("name")?.takeIf { it.isNotEmpty() }
-                    ?: "CarPlay / Android Auto"
-                val channelDesc = channelConfig?.optString("description")?.takeIf { it.isNotEmpty() }
-                    ?: "CarPlay and Android Auto connect/disconnect notifications"
-                val importance = when (channelConfig?.optString("importance")) {
-                    "high" -> NotificationManager.IMPORTANCE_HIGH
-                    "low" -> NotificationManager.IMPORTANCE_LOW
-                    else -> NotificationManager.IMPORTANCE_DEFAULT
-                }
-
-                val notifMgr = context.getSystemService(NotificationManager::class.java)
-                if (notifMgr?.getNotificationChannel(CARPLAY_CHANNEL_ID) == null) {
-                    val channel = NotificationChannel(CARPLAY_CHANNEL_ID, channelName, importance).apply {
-                        description = channelDesc
-                    }
-                    notifMgr?.createNotificationChannel(channel)
-                }
-            }
-        }
+        fun ensureCarPlayNotificationChannel(context: Context) = ensureChannel(
+            context,
+            CARPLAY_CHANNEL_ID,
+            "carPlayChannel",
+            "CarPlay / Android Auto",
+            "CarPlay and Android Auto connect/disconnect notifications",
+            NotificationManager.IMPORTANCE_DEFAULT
+        )
 
         /**
-         * Build the foreground notification from any Context (service or module).
-         * Shared so that ExpoBeaconModule can pass the same notification to
-         * enableForegroundServiceScanning() before the service starts.
+         * Build the persistent foreground-service notification from any Context.
+         * Static so cold-start paths that run before a service instance exists
+         * (e.g. [BootReceiver]) read the same persisted config.
          */
         fun buildForegroundNotification(context: Context): Notification {
-            val json = context.getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
-                .getString("config", null)
-            val config = try { org.json.JSONObject(json ?: "") } catch (_: Exception) { org.json.JSONObject() }
-            val fgConfig = config.optJSONObject("foregroundService")
+            val fgConfig = readNotificationConfig(context).optJSONObject("foregroundService")
 
             // If beacon monitoring is not active and the service is alive only
             // for CarPlay observation, fall back to a generic notification so
@@ -1354,14 +1338,9 @@ class BeaconForegroundService : Service(), BeaconConsumer {
 
             val title = fgConfig?.optString("title")?.takeIf { it.isNotEmpty() } ?: defaultTitle
             val text = fgConfig?.optString("text")?.takeIf { it.isNotEmpty() } ?: defaultText
-            val iconName = fgConfig?.optString("icon")?.takeIf { it.isNotEmpty() }
-            val iconResId = iconName?.let { name ->
-                try { context.resources.getIdentifier(name, "drawable", context.packageName).takeIf { it != 0 } }
-                catch (_: Exception) { null }
-            } ?: android.R.drawable.ic_dialog_info
 
             return NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(iconResId)
+                .setSmallIcon(resolveIconRes(context, fgConfig))
                 .setContentTitle(title)
                 .setContentText(text)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -1370,10 +1349,46 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         }
     }
 
-    private fun readNotificationConfig(): org.json.JSONObject {
-        val json = getSharedPreferences(NOTIFICATION_CONFIG_PREFS, Context.MODE_PRIVATE)
-            .getString("config", null) ?: return org.json.JSONObject()
-        return try { org.json.JSONObject(json) } catch (_: Exception) { org.json.JSONObject() }
+    private fun readNotificationConfig(): org.json.JSONObject = readNotificationConfig(this)
+
+    /**
+     * Stop all beacon ranging/monitoring, cancel beacon timers, and unbind from
+     * AltBeacon, while leaving the service (and any CarPlay observer) running.
+     * Safe to call when monitoring was never armed. Used both by
+     * [ACTION_DISABLE_MONITORING] (CarPlay-only mode) and [onDestroy].
+     */
+    private fun disableMonitoringInternal() {
+        pendingLoadRegions = false
+        timeoutHandler.removeCallbacksAndMessages(null)
+        timeoutRunnables.clear()
+        inactivityRunnables.clear()
+        beaconTimeouts.clear()
+        lastSeenAtMs.clear()
+        distanceLogRegions.forEach {
+            try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
+        }
+        distanceLogRegions.clear()
+        monitoredRegions.forEach {
+            try { beaconManager.stopMonitoringBeaconsInRegion(it) } catch (_: RemoteException) {}
+        }
+        monitoredRegions.clear()
+        monitoredRegionIds.clear()
+        enteredRegions.clear()
+        synchronized(distanceLock) {
+            enterCounters.clear()
+            exitCounters.clear()
+            missCounters.clear()
+            smoothedDistances.clear()
+        }
+        beaconManager.removeMonitorNotifier(monitorNotifier)
+        beaconManager.removeRangeNotifier(rangeNotifier)
+        beaconManager.removeRangeNotifier(distanceLoggingRangeNotifier)
+        // Only unbind if we successfully bound — CarPlay-only service
+        // instances skip beaconManager.bind() in onStartCommand.
+        if (serviceConnected) {
+            serviceConnected = false
+            try { beaconManager.unbind(this) } catch (_: Throwable) {}
+        }
     }
 
     override fun onDestroy() {
@@ -1386,35 +1401,11 @@ class BeaconForegroundService : Service(), BeaconConsumer {
             carPlayMonitor?.stop()
         } catch (_: Throwable) {}
         carPlayMonitor = null
-        val wasBound = serviceConnected
-        serviceConnected = false
-        timeoutHandler.removeCallbacksAndMessages(null)
-        timeoutRunnables.clear()
-        inactivityRunnables.clear()
-        beaconTimeouts.clear()
-        lastSeenAtMs.clear()
-        monitoredRegionIds.clear()
-        releaseEventLogger()
-        beaconManager.removeMonitorNotifier(monitorNotifier)
-        beaconManager.removeRangeNotifier(rangeNotifier)
-        beaconManager.removeRangeNotifier(distanceLoggingRangeNotifier)
-        distanceLogRegions.forEach {
-            try { beaconManager.stopRangingBeaconsInRegion(it) } catch (_: RemoteException) {}
-        }
-        distanceLogRegions.clear()
-        enteredRegions.clear()
-        enterCounters.clear()
-        exitCounters.clear()
-        missCounters.clear()
+        disableMonitoringInternal()
         notifIdMap.clear()
-        monitoredRegions.forEach {
-            try { beaconManager.stopMonitoringBeaconsInRegion(it) } catch (_: RemoteException) {}
-        }
-        // Only unbind if we successfully bound — CarPlay-only service
-        // instances skip beaconManager.bind() in onStartCommand.
-        if (wasBound) {
-            try { beaconManager.unbind(this) } catch (_: Throwable) {}
-        }
+        releaseEventLogger()
+        apiForwarder?.shutdown()
+        apiForwarder = null
         super.onDestroy()
     }
 
@@ -1455,8 +1446,10 @@ class BeaconForegroundService : Service(), BeaconConsumer {
         )
         super.onTaskRemoved(rootIntent)
     }
-
-    override fun getApplicationContext(): Context = super.getApplicationContext()
 }
 
 const val ACTION_BEACON_EVENT = "expo.modules.beacon.BEACON_EVENT"
+/** Intent extra holding the resolved JS event name (e.g. "onBeaconEnter"). */
+internal const val EXTRA_EVENT_NAME = "eventName"
+/** Intent extra holding the event payload as a Bundle, unpacked verbatim by [BeaconEventReceiver]. */
+internal const val EXTRA_EVENT_PARAMS = "params"

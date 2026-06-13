@@ -16,7 +16,7 @@ import {
   CarPlayDiagnostics,
 } from "./ExpoBeacon.types";
 
-declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
+export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   /**
    * Start a one-shot iBeacon scan. Resolves with discovered beacons after scanDuration ms.
    *
@@ -46,6 +46,10 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
 
   /**
    * Register a beacon for persistent region monitoring.
+   *
+   * Re-pairing an existing iBeacon identifier replaces the previous entry.
+   * Throws `DUPLICATE_IDENTIFIER` if the identifier is already used by a
+   * paired Eddystone beacon.
    */
   pairBeacon(
     identifier: string,
@@ -68,6 +72,11 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
 
   /**
    * Register an Eddystone-UID beacon for persistent monitoring.
+   * Namespace and instance are normalized to lowercase before storage.
+   *
+   * Re-pairing an existing Eddystone identifier replaces the previous entry.
+   * Throws `DUPLICATE_IDENTIFIER` if the identifier is already used by a
+   * paired iBeacon.
    */
   pairEddystone(
     identifier: string,
@@ -104,13 +113,19 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   startMonitoring(options?: MonitoringOptions | number): Promise<void>;
 
   /**
-   * Stop background region monitoring.
+   * Stop background region monitoring. Persisted monitoring options
+   * (maxDistance, exitDistance, level, exitTimeoutSeconds, …) are cleared
+   * on both platforms.
    */
   stopMonitoring(): Promise<void>;
 
   /**
-   * Start a continuous BLE scan. Fires `onBeaconFound` events as beacons are detected.
-   * Call stopContinuousScan() to end the scan.
+   * Start a continuous BLE scan. Fires `onBeaconFound` / `onEddystoneFound`
+   * events as beacons are detected. Call stopContinuousScan() to end the scan.
+   *
+   * iOS only ranges the UUIDs of PAIRED beacons — with no paired beacons no
+   * iBeacons are discovered. Android discovers all nearby iBeacons.
+   * Eddystone discovery works on both platforms regardless of pairing.
    */
   startContinuousScan(): void;
 
@@ -123,7 +138,16 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    */
   cancelScan(): void;
 
-  /** Request Bluetooth + Location permissions. Returns true if granted. */
+  /**
+   * Request the permissions needed for scanning and monitoring.
+   *
+   * - Android: requests location, Bluetooth (API 31+) and notification
+   *   (API 33+) permissions, then background location (API 29+) in a second
+   *   prompt; resolves true only when background location is granted.
+   * - iOS: requests location When-In-Use authorization and resolves true once
+   *   granted — the Always upgrade is requested later by startMonitoring(),
+   *   and Bluetooth permission is not prompted here.
+   */
   requestPermissionsAsync(): Promise<boolean>;
 
   /**
@@ -170,7 +194,8 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * ensuring delivery even when the JS bridge is not active (app backgrounded).
    *
    * @param url The API endpoint URL to POST events to.
-   * @param apiKey Optional API key sent as X-CSFR-Token header.
+   * @param apiKey Optional API key sent as the X-CSFR-Token header
+   *   (sic — the header is literally "X-CSFR-Token", not "X-CSRF-Token").
    * @param id Optional identifier appended to every forwarded event payload.
    */
   setApiEndpoint(url: string, apiKey?: string, id?: string): void;
@@ -253,8 +278,10 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
    * without waiting for an event. Useful on mount to immediately reflect
    * whether a car session is already active.
    *
-   * Reads from the live observer if the foreground service is running, or falls
-   * back to the persisted last-known state otherwise.
+   * Android reads from the live observer if the foreground service is running,
+   * falling back to the persisted last-known state otherwise. iOS reads the
+   * persisted last-known state, including the last-connect transport and
+   * timestamp.
    */
   getCarPlayConnectionStatus(): CarPlayConnectionStatus;
 
@@ -270,4 +297,8 @@ declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
   getCarPlayDiagnostics(): CarPlayDiagnostics;
 }
 
+// The scan parameters are genuinely optional: both native implementations
+// default an omitted scanDuration to 5000 ms (and an omitted uuid list to the
+// paired-UUID fallback on iOS / wildcard on Android), so the optional TS
+// signatures are honoured without a JS-side shim.
 export default requireNativeModule<ExpoBeaconModule>("ExpoBeacon");

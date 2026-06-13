@@ -1,6 +1,13 @@
 import Foundation
+import ExpoModulesCore
 
 extension ExpoBeaconModule {
+    /// Rejects a promise and emits the matching `onBeaconError` event.
+    func rejectAndEmit(_ promise: Promise, _ code: String, _ message: String) {
+        promise.reject(code, message)
+        sendLoggedEvent("onBeaconError", ["identifier": "", "code": code, "message": message])
+    }
+
     /// Sends an event to JS and logs it to SQLite if logging is enabled.
     func sendLoggedEvent(_ eventName: String, _ params: [String: Any]) {
         if isEventLoggingEnabled() {

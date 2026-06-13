@@ -2,38 +2,13 @@ import CoreLocation
 import UserNotifications
 
 extension ExpoBeaconModule {
-    func requestLocationPermission(requireAlways: Bool = false, completion: @escaping (Bool) -> Void) {
+    func requestLocationPermission(completion: @escaping (Bool) -> Void) {
         let status = locationManager.authorizationStatus
         switch status {
-        case .authorizedAlways:
+        case .authorizedAlways, .authorizedWhenInUse:
             completion(true)
-        case .authorizedWhenInUse:
-            if requireAlways {
-                // Already have whenInUse — request upgrade to always
-                self.permissionCompletion = { granted in
-                    // After the upgrade prompt, only .authorizedAlways counts
-                    let nowStatus = self.locationManager.authorizationStatus
-                    completion(nowStatus == .authorizedAlways)
-                }
-                locationManager.requestAlwaysAuthorization()
-            } else {
-                completion(true)
-            }
         case .notDetermined:
-            // Two-step flow: first request whenInUse, then upgrade to always
-            self.permissionCompletion = { _ in
-                let nowStatus = self.locationManager.authorizationStatus
-                if requireAlways && nowStatus == .authorizedWhenInUse {
-                    // Got provisional whenInUse — request upgrade to always
-                    self.permissionCompletion = { _ in
-                        let finalStatus = self.locationManager.authorizationStatus
-                        completion(finalStatus == .authorizedAlways)
-                    }
-                    self.locationManager.requestAlwaysAuthorization()
-                } else {
-                    completion(nowStatus == .authorizedAlways || nowStatus == .authorizedWhenInUse)
-                }
-            }
+            permissionCompletions.append(completion)
             locationManager.requestWhenInUseAuthorization()
         default:
             completion(false)
@@ -45,11 +20,16 @@ extension ExpoBeaconModule {
     }
 
     func handleDidChangeAuthorization(_ status: CLAuthorizationStatus) {
+        // The first callback after requestWhenInUseAuthorization() can still be
+        // .notDetermined (prompt not yet answered) — keep completions pending
+        // until the user makes an actual choice.
+        guard status != .notDetermined else { return }
         let granted = (status == .authorizedAlways || status == .authorizedWhenInUse)
-        // Nil out BEFORE calling so the closure can set a new permissionCompletion
-        // (e.g. the notDetermined → whenInUse → always two-step upgrade flow).
-        let completion = permissionCompletion
-        permissionCompletion = nil
-        completion?(granted)
+        // Drain BEFORE calling so a completion can register a new request.
+        let completions = permissionCompletions
+        permissionCompletions.removeAll()
+        for completion in completions {
+            completion(granted)
+        }
     }
 }

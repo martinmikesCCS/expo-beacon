@@ -12,6 +12,14 @@ import * as path from "path";
 
 export type BeaconIOSPluginProps = {
   /**
+   * Generate `BeaconGeoPlugin.swift` and register it in `AppDelegate.swift`
+   * so beacon and CarPlay events start/stop
+   * `react-native-background-geolocation` natively. Requires
+   * `react-native-background-geolocation` to be installed — set to `false`
+   * when you don't use that library. Default: `true`.
+   */
+  backgroundGeolocation?: boolean;
+  /**
    * Enable the CarPlay "Driving Task" entitlement integration.
    *
    * When `true` the plugin will:
@@ -162,12 +170,12 @@ function findAppDir(
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
-const withBeaconIOS: ConfigPlugin<BeaconIOSPluginProps | void> = (
-  config,
-  props,
-) => {
-  const opts: BeaconIOSPluginProps = props ?? {};
-
+/**
+ * Write BeaconGeoPlugin.swift, add it to the Xcode target, and register it in
+ * AppDelegate.swift. Gated by the `backgroundGeolocation` plugin prop
+ * (default: enabled).
+ */
+const withBeaconGeoPlugin: ConfigPlugin = (config) => {
   // Step 1 – write BeaconGeoPlugin.swift into the iOS app directory.
   config = withDangerousMod(config, [
     "ios",
@@ -243,7 +251,36 @@ const withBeaconIOS: ConfigPlugin<BeaconIOSPluginProps | void> = (
     },
   ]);
 
-  // Step 4 (opt-in) – CarPlay Driving Task entitlement + scene manifest.
+  return config;
+};
+
+const withBeaconIOS: ConfigPlugin<BeaconIOSPluginProps | void> = (
+  config,
+  props,
+) => {
+  const opts: BeaconIOSPluginProps = props ?? {};
+
+  // Steps 1–3 – BeaconGeoPlugin generation + AppDelegate registration
+  // (react-native-background-geolocation integration). Opt-out via
+  // `backgroundGeolocation: false`.
+  if (opts.backgroundGeolocation ?? true) {
+    config = withBeaconGeoPlugin(config);
+  }
+
+  // Step 4 – merge "location" into UIBackgroundModes. The native module only
+  // enables background ranging when this mode is present in Info.plist.
+  config = withInfoPlist(config, (cfg) => {
+    const modes: string[] = Array.isArray(cfg.modResults.UIBackgroundModes)
+      ? cfg.modResults.UIBackgroundModes
+      : [];
+    if (!modes.includes("location")) {
+      modes.push("location");
+    }
+    cfg.modResults.UIBackgroundModes = modes;
+    return cfg;
+  });
+
+  // Step 5 (opt-in) – CarPlay Driving Task entitlement + scene manifest.
   if (opts.carplayDrivingTask) {
     config = withCarPlayDrivingTask(config);
   }
@@ -258,13 +295,13 @@ const CARPLAY_SCENE_DELEGATE_CLASS = "ExpoBeacon.BeaconCarPlaySceneDelegate";
 const CARPLAY_SCENE_CONFIG_NAME = "ExpoBeaconCarPlay";
 
 function withCarPlayDrivingTask(config: Parameters<ConfigPlugin>[0]) {
-  // 4a — entitlement
+  // 5a — entitlement
   config = withEntitlementsPlist(config, (cfg) => {
     cfg.modResults[CARPLAY_ENTITLEMENT_KEY] = true;
     return cfg;
   });
 
-  // 4b — Info.plist scene manifest
+  // 5b — Info.plist scene manifest
   config = withInfoPlist(config, (cfg) => {
     const info = cfg.modResults as Record<string, any>;
     const manifest = (info.UIApplicationSceneManifest =

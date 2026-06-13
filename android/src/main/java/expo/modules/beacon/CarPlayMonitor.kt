@@ -46,6 +46,8 @@ internal class CarPlayMonitor(private val context: Context) {
      * cold service restart.
      */
     private var pendingDisconnectCheck: Runnable? = null
+    /** Pending diagnostic-probe runnable posted by [start]; cancelled in [stop]. */
+    private var diagnosticProbe: Runnable? = null
     /** Most recent raw type seen from the LiveData; used by the grace re-check. */
     @Volatile internal var lastObservedType: Int = CarConnection.CONNECTION_TYPE_NOT_CONNECTED
         private set
@@ -86,7 +88,8 @@ internal class CarPlayMonitor(private val context: Context) {
                     // meta-data entry in the host app's manifest — Gearhead
                     // then silently returns NOT_CONNECTED and the LiveData
                     // never updates beyond the bootstrap value.
-                    mainHandler.postDelayed({
+                    val probe = Runnable {
+                        diagnosticProbe = null
                         if (!hasObservedValue) {
                             Log.w(TAG, "CarPlay diagnostic: no CarConnection value received after ${DIAGNOSTIC_PROBE_MS}ms. " +
                                 "Host app is likely missing the AndroidAuto registration meta-data " +
@@ -95,7 +98,9 @@ internal class CarPlayMonitor(private val context: Context) {
                         } else {
                             Log.d(TAG, "CarPlay diagnostic: lastObservedType=$lastObservedType after ${DIAGNOSTIC_PROBE_MS}ms (OK)")
                         }
-                    }, DIAGNOSTIC_PROBE_MS)
+                    }
+                    diagnosticProbe = probe
+                    mainHandler.postDelayed(probe, DIAGNOSTIC_PROBE_MS)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to start CarPlay monitoring: ${e.message}")
                 }
@@ -107,12 +112,17 @@ internal class CarPlayMonitor(private val context: Context) {
     fun stop() {
         runOnMain {
             cancelPendingDisconnectCheck()
+            diagnosticProbe?.let { mainHandler.removeCallbacks(it) }
+            diagnosticProbe = null
             observer?.let {
                 try { liveData.removeObserver(it) } catch (_: Exception) {}
             }
             observer = null
             emit = null
             lastConnected = null
+            // Reset observation state so diagnostics never report stale values.
+            hasObservedValue = false
+            lastObservedType = CarConnection.CONNECTION_TYPE_NOT_CONNECTED
             Log.d(TAG, "CarPlay monitoring stopped")
         }
     }
@@ -121,9 +131,6 @@ internal class CarPlayMonitor(private val context: Context) {
 
     /** Returns `true` if the LiveData observer is currently registered. */
     internal fun isObserving(): Boolean = observer != null
-
-    /** Returns `true` if the last observed connection state is connected. */
-    internal fun isCurrentlyConnected(): Boolean = lastConnected == true
 
     /**
      * Builds an `onCarPlayConnected` payload from the last observed state.
@@ -243,7 +250,7 @@ internal class CarPlayMonitor(private val context: Context) {
     }
 
     private fun prefs(): SharedPreferences? = try {
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        context.applicationContext.getSharedPreferences(CARPLAY_MONITOR_PREFS, Context.MODE_PRIVATE)
     } catch (e: Throwable) {
         Log.w(TAG, "Failed to open CarPlayMonitor prefs", e)
         null
@@ -266,8 +273,9 @@ internal class CarPlayMonitor(private val context: Context) {
 
     companion object {
         private const val TAG = "CarPlayMonitor"
-        private const val PREFS_NAME = "expo_beacon_carplay_monitor"
-        private const val KEY_LAST_CONNECTED = "last_connected"
+        /** Persisted last-known connection state. Internal so [BeaconForegroundService.getCarPlayStatus] can read it. */
+        internal const val CARPLAY_MONITOR_PREFS = "expo_beacon_carplay_monitor"
+        internal const val KEY_LAST_CONNECTED = "last_connected"
         /**
          * Grace window before emitting a `disconnected` event when the
          * persisted state was `connected` but the freshly-attached observer
@@ -297,7 +305,7 @@ internal class CarPlayMonitor(private val context: Context) {
         fun clearPersistedState(context: Context) {
             try {
                 context.applicationContext
-                    .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getSharedPreferences(CARPLAY_MONITOR_PREFS, Context.MODE_PRIVATE)
                     .edit()
                     .remove(KEY_LAST_CONNECTED)
                     .apply()

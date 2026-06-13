@@ -18,6 +18,9 @@ private const val ACTION_RETRY_MONITORING = "expo.modules.beacon.ACTION_RETRY_MO
  */
 internal const val ACTION_CARPLAY_WATCHDOG = "expo.modules.beacon.ACTION_CARPLAY_WATCHDOG"
 private const val ACTION_TASK_REMOVED_KEEPALIVE = "expo.modules.beacon.ACTION_TASK_REMOVED_KEEPALIVE"
+private const val EXTRA_RETRY_COUNT = "retryCount"
+/** Cap on self-scheduled retries, mirroring the service's MAX_STARTFOREGROUND_RETRIES. */
+private const val MAX_BOOT_RETRIES = 3
 private const val RETRY_DELAY_MS = 10_000L
 private const val RETRY_REQUEST_CODE = 0x424F4F54 // "BOOT"
 private const val CARPLAY_WATCHDOG_REQUEST_CODE = 0x43504C57 // "CPLW"
@@ -60,10 +63,11 @@ class BootReceiver : BroadcastReceiver() {
                 }
             }
             ACTION_RETRY_MONITORING -> {
+                val retryCount = intent.getIntExtra(EXTRA_RETRY_COUNT, 0)
                 if (BeaconForegroundService.isMonitoringActive(context)) {
-                    tryStartService(context)
+                    tryStartService(context, retryCount)
                 } else if (BeaconForegroundService.isCarPlayEnabled(context)) {
-                    tryEnableCarPlay(context)
+                    tryEnableCarPlay(context, retryCount)
                 }
             }
             ACTION_CARPLAY_WATCHDOG -> {
@@ -76,6 +80,9 @@ class BootReceiver : BroadcastReceiver() {
                 }
                 tryEnableCarPlay(context)
                 // Reschedule the next tick. setExactAndAllowWhileIdle is one-shot.
+                // enableCarPlay() above also arms this alarm, but re-arming here
+                // keeps the chain alive even if enableCarPlay throws before it
+                // reaches its own scheduling call.
                 scheduleCarPlayWatchdogAlarm(context)
             }
             ACTION_TASK_REMOVED_KEEPALIVE -> {
@@ -96,7 +103,7 @@ class BootReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun tryStartService(context: Context) {
+    private fun tryStartService(context: Context, retryCount: Int = 0) {
         try {
             BeaconForegroundService.start(context)
             Log.d(TAG, "BootReceiver: BeaconForegroundService started successfully")
@@ -104,27 +111,32 @@ class BootReceiver : BroadcastReceiver() {
             // ForegroundServiceStartNotAllowedException extends SecurityException.
             // Can occur on Android 17 beta if Bluetooth is not yet fully initialized at boot.
             Log.e(TAG, "BootReceiver: Failed to start service (SecurityException) — retrying in ${RETRY_DELAY_MS}ms", e)
-            scheduleRetry(context)
+            scheduleRetry(context, retryCount)
         } catch (e: Exception) {
             Log.e(TAG, "BootReceiver: Failed to start service — retrying in ${RETRY_DELAY_MS}ms", e)
-            scheduleRetry(context)
+            scheduleRetry(context, retryCount)
         }
     }
 
-    private fun tryEnableCarPlay(context: Context) {
+    private fun tryEnableCarPlay(context: Context, retryCount: Int = 0) {
         try {
             BeaconForegroundService.enableCarPlay(context)
             Log.d(TAG, "BootReceiver: CarPlay-only service started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "BootReceiver: Failed to start CarPlay-only service — retrying in ${RETRY_DELAY_MS}ms", e)
-            scheduleRetry(context)
+            scheduleRetry(context, retryCount)
         }
     }
 
-    private fun scheduleRetry(context: Context) {
+    private fun scheduleRetry(context: Context, retryCount: Int) {
+        if (retryCount >= MAX_BOOT_RETRIES) {
+            Log.e(TAG, "BootReceiver: giving up after $MAX_BOOT_RETRIES retries")
+            return
+        }
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
         val retryIntent = Intent(context, BootReceiver::class.java).apply {
             action = ACTION_RETRY_MONITORING
+            putExtra(EXTRA_RETRY_COUNT, retryCount + 1)
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,

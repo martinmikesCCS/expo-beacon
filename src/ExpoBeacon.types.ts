@@ -4,8 +4,8 @@ export type BeaconScanResult = {
   major: number; // iBeacon major value (0–65535)
   minor: number; // iBeacon minor value (0–65535)
   rssi: number; // Signal strength in dBm (negative number)
-  distance: number; // Estimated distance in meters
-  txPower: number; // Calibrated TX power
+  distance: number; // Estimated distance in meters (-1 when unavailable)
+  txPower: number; // Calibrated TX power. Android only — always 0 on iOS (CoreLocation does not expose it)
   /** BLE advertising device name. May be undefined on iOS (CoreLocation does not expose it for iBeacon). */
   name?: string;
 };
@@ -24,12 +24,11 @@ export type PairedBeacon = {
   /** BLE advertising device name, if provided at pairing time. */
   name?: string;
   /**
-   * Timeout in seconds. When set, the module fires `onBeaconTimeout` once
-   * after the beacon has been continuously in range for this duration.
-   * The timer resets if the beacon exits and re-enters range.
-   *
-   * The timeout countdown also starts if no BLE readings are received
-   * for 60 seconds (e.g. due to Doze mode or background throttling).
+   * Timeout in seconds. When set, the module fires `onBeaconTimeout` once,
+   * this many seconds after the beacon exits range. The countdown is armed on
+   * exit — or when no BLE readings arrive for 60 seconds (e.g. due to Doze
+   * mode or background throttling) — and is cancelled if the beacon is seen
+   * again before it fires.
    */
   timeoutSeconds?: number;
 };
@@ -58,13 +57,13 @@ export type BeaconDistanceEvent = {
   rssi?: number;
 };
 
-/** Payload for beacon timeout events (beacon in range for configured duration). */
+/** Payload for beacon timeout events (beacon out of range for the configured duration). */
 export type BeaconTimeoutEvent = {
   identifier: string;
   uuid: string;
   major: number;
   minor: number;
-  /** Current distance in metres at the time the timeout fired. */
+  /** Distance in metres at the time the timeout fired. Usually –1, since the beacon is out of range when this fires. */
   distance: number;
 };
 
@@ -216,6 +215,9 @@ export type MonitoringOptions = {
    * Readings below this threshold are discarded as unreliable, preventing
    * false detections from reflected or distant signals.
    *
+   * Applies to monitoring readings only — one-shot scan results are not
+   * filtered.
+   *
    * Default: -85. Typical range: -100 (very permissive) to -70 (strict).
    */
   minRssi?: number;
@@ -271,12 +273,11 @@ export type PairedEddystone = {
   /** BLE advertising device name, if provided at pairing time. */
   name?: string;
   /**
-   * Timeout in seconds. When set, the module fires `onEddystoneTimeout` once
-   * after the beacon has been continuously in range for this duration.
-   * The timer resets if the beacon exits and re-enters range.
-   *
-   * The timeout countdown also starts if no BLE readings are received
-   * for 60 seconds (e.g. due to Doze mode or background throttling).
+   * Timeout in seconds. When set, the module fires `onEddystoneTimeout` once,
+   * this many seconds after the beacon exits range. The countdown is armed on
+   * exit — or when no BLE readings arrive for 60 seconds (e.g. due to Doze
+   * mode or background throttling) — and is cancelled if the beacon is seen
+   * again before it fires.
    */
   timeoutSeconds?: number;
 };
@@ -303,12 +304,12 @@ export type EddystoneDistanceEvent = {
   rssi?: number;
 };
 
-/** Payload for Eddystone timeout events (beacon in range for configured duration). */
+/** Payload for Eddystone timeout events (beacon out of range for the configured duration). */
 export type EddystoneTimeoutEvent = {
   identifier: string;
   namespace: string;
   instance: string;
-  /** Current distance in metres at the time the timeout fired. */
+  /** Distance in metres at the time the timeout fired. Usually –1, since the beacon is out of range when this fires. */
   distance: number;
 };
 
@@ -435,7 +436,7 @@ export type ExpoBeaconModuleEvents = {
   onBeaconEnter: (params: BeaconRegionEvent) => void;
   onBeaconExit: (params: BeaconRegionEvent) => void;
   onBeaconDistance: (params: BeaconDistanceEvent) => void;
-  /** Fired once after a paired beacon has been continuously in range for its configured `timeoutSeconds`. */
+  /** Fired once `timeoutSeconds` after a paired beacon exits range (cancelled if the beacon is seen again first). */
   onBeaconTimeout: (params: BeaconTimeoutEvent) => void;
   /** Fired continuously during a live scan as each iBeacon is detected. */
   onBeaconFound: (params: BeaconScanResult) => void;
@@ -444,7 +445,7 @@ export type ExpoBeaconModuleEvents = {
   onEddystoneEnter: (params: EddystoneRegionEvent) => void;
   onEddystoneExit: (params: EddystoneRegionEvent) => void;
   onEddystoneDistance: (params: EddystoneDistanceEvent) => void;
-  /** Fired once after a paired Eddystone has been continuously in range for its configured `timeoutSeconds`. */
+  /** Fired once `timeoutSeconds` after a paired Eddystone exits range (cancelled if the beacon is seen again first). */
   onEddystoneTimeout: (params: EddystoneTimeoutEvent) => void;
   /** Fired when a native monitoring or ranging failure occurs (logged to DB and forwarded to JS). */
   onBeaconError: (params: BeaconErrorEvent) => void;

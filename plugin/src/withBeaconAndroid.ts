@@ -25,6 +25,14 @@ export type AndroidAutoUsesName = 'template' | 'media' | 'notification';
 
 export type BeaconAndroidPluginProps = {
   /**
+   * Generate `BeaconGeoPlugin.kt` and register it in `MainApplication.kt` so
+   * beacon and Android Auto events start/stop
+   * `react-native-background-geolocation` natively. Requires
+   * `react-native-background-geolocation` to be installed — set to `false`
+   * when you don't use that library. Default: `true`.
+   */
+  backgroundGeolocation?: boolean;
+  /**
    * Android Auto registration. When enabled (the default), the plugin injects
    * the `com.google.android.gms.car.application` meta-data into the consumer
    * app's `AndroidManifest.xml` and emits a matching
@@ -201,14 +209,11 @@ function withAndroidAutoDescriptor(usesName: AndroidAutoUsesName): ConfigPlugin 
   ]);
 }
 
-const withBeaconAndroid: ConfigPlugin<BeaconAndroidPluginProps | void> = (
-  config,
-  props,
-) => {
-  const opts: BeaconAndroidPluginProps = props ?? {};
-  const aaRegister = opts.androidAuto?.register ?? true;
-  const aaUsesName: AndroidAutoUsesName = opts.androidAuto?.usesName ?? 'template';
-
+/**
+ * Write BeaconGeoPlugin.kt and register it in MainApplication.kt. Gated by
+ * the `backgroundGeolocation` plugin prop (default: enabled).
+ */
+const withBeaconGeoPlugin: ConfigPlugin = (config) => {
   // Step 1 – write BeaconGeoPlugin.kt into the app source tree.
   config = withDangerousMod(config, [
     'android',
@@ -232,7 +237,7 @@ const withBeaconAndroid: ConfigPlugin<BeaconAndroidPluginProps | void> = (
     },
   ]);
 
-  // Step 2 – patch MainApplication (Kotlin or Java) to call register().
+  // Step 2 – patch MainApplication (Kotlin only) to call register().
   config = withDangerousMod(config, [
     'android',
     (config) => {
@@ -259,11 +264,39 @@ const withBeaconAndroid: ConfigPlugin<BeaconAndroidPluginProps | void> = (
         return config;
       }
 
+      // The injected import + registration use Kotlin syntax and would corrupt
+      // a Java MainApplication — leave Java projects untouched.
+      if (mainAppPath.endsWith('.java')) {
+        console.warn(
+          '[expo-beacon] MainApplication.java (Java) cannot be patched automatically — ' +
+            'please add BeaconPluginRegistry.register(BeaconGeoPlugin(this)) manually.',
+        );
+        return config;
+      }
+
       const original = fs.readFileSync(mainAppPath, 'utf-8');
       fs.writeFileSync(mainAppPath, modifyMainApplication(original));
       return config;
     },
   ]);
+
+  return config;
+};
+
+const withBeaconAndroid: ConfigPlugin<BeaconAndroidPluginProps | void> = (
+  config,
+  props,
+) => {
+  const opts: BeaconAndroidPluginProps = props ?? {};
+  const aaRegister = opts.androidAuto?.register ?? true;
+  const aaUsesName: AndroidAutoUsesName = opts.androidAuto?.usesName ?? 'template';
+
+  // Steps 1–2 – BeaconGeoPlugin generation + MainApplication registration
+  // (react-native-background-geolocation integration). Opt-out via
+  // `backgroundGeolocation: false`.
+  if (opts.backgroundGeolocation ?? true) {
+    config = withBeaconGeoPlugin(config);
+  }
 
   // Step 3 – register the consumer app as Android-Auto-aware so Gearhead
   // surfaces CarConnection.PROJECTION to our CarPlayMonitor. Opt-out via

@@ -1,9 +1,6 @@
 import Foundation
 import os.log
 
-private let API_URL_KEY = "expo.beacon.api_url"
-private let API_KEY_KEY = "expo.beacon.api_key"
-private let ID_KEY = "expo.beacon.id"
 private let MAX_RETRIES = 3
 
 /// Fire-and-forget HTTP event forwarder for beacon events.
@@ -14,8 +11,8 @@ final class BeaconApiForwarder {
     private let defaults: UserDefaults
     private let session: URLSession
 
-    init(defaults: UserDefaults? = nil) {
-        self.defaults = defaults ?? (UserDefaults(suiteName: "expo.modules.beacon") ?? .standard)
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
@@ -32,9 +29,9 @@ final class BeaconApiForwarder {
             defaults.removeObject(forKey: API_KEY_KEY)
         }
         if let id = id {
-            defaults.set(id, forKey: ID_KEY)
+            defaults.set(id, forKey: API_ID_KEY)
         } else {
-            defaults.removeObject(forKey: ID_KEY)
+            defaults.removeObject(forKey: API_ID_KEY)
         }
     }
 
@@ -42,7 +39,7 @@ final class BeaconApiForwarder {
         return [
             "url": defaults.string(forKey: API_URL_KEY),
             "apiKey": defaults.string(forKey: API_KEY_KEY),
-            "id": defaults.string(forKey: ID_KEY)
+            "id": defaults.string(forKey: API_ID_KEY)
         ]
     }
 
@@ -57,7 +54,7 @@ final class BeaconApiForwarder {
         let apiKey = defaults.string(forKey: API_KEY_KEY)
 
         var payload = params
-        if let id = defaults.string(forKey: ID_KEY), !id.isEmpty {
+        if let id = defaults.string(forKey: API_ID_KEY), !id.isEmpty {
             payload["id"] = id
         }
         payload["timestamp"] = Int64(Date().timeIntervalSince1970 * 1000)

@@ -124,15 +124,11 @@ extension ExpoBeaconModule {
     // MARK: - Eddystone discovery (BLE callback)
 
     func handleEddystoneDiscovery(advertisementData: [String: Any], rssi: NSNumber) {
-        let eddystoneServiceUUID = CBUUID(string: "FEAA")
         guard let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
-              let data = serviceData[eddystoneServiceUUID] else { return }
+              let data = serviceData[EDDYSTONE_SERVICE_UUID] else { return }
 
-        guard let beacon = ExpoBeaconModule.parseEddystoneFrame(data: data, rssi: rssi.intValue) else { return }
-
-        // Discard weak signals that produce unreliable distance estimates
         let beaconRssi = rssi.intValue
-        guard beaconRssi >= minRssiThreshold else { return }
+        guard let beacon = ExpoBeaconModule.parseEddystoneFrame(data: data, rssi: beaconRssi) else { return }
 
         // Augment with the BLE advertising device name if present
         var beaconInfo = beacon
@@ -147,6 +143,11 @@ extension ExpoBeaconModule {
         if continuousScanActive {
             sendLoggedEvent("onEddystoneFound", beaconInfo)
         }
+
+        // Monitoring path only: discard weak signals that produce unreliable
+        // distance estimates. One-shot scans and continuous-scan found events
+        // are NOT filtered (Android does not filter scans either).
+        guard beaconRssi >= minRssiThreshold else { return }
 
         // Eddystone monitoring: match UID frames against paired list
         guard eddystoneMonitoringActive,
@@ -168,14 +169,14 @@ extension ExpoBeaconModule {
             // Distance-driven enter/exit with hysteresis — evaluated on every
             // BLE callback (not throttled) so the hysteresis counters advance
             // reliably regardless of advertisement rate.
-            let maxDist = self.defaults.object(forKey: MAX_DISTANCE_KEY) as? Double
-            let exitDist = self.defaults.object(forKey: EXIT_DISTANCE_KEY) as? Double
+            let maxDist = maxDistanceThreshold
+            let exitDist = exitDistanceThreshold
             let hasValidDistance = distance.isFinite && distance >= 0
             if hasValidDistance || maxDist == nil {
                 // Apply EMA smoothing; jump resets EMA to the new value
                 let effectiveDistance: Double
                 if hasValidDistance {
-                    effectiveDistance = smoothDistance(identifier: identifier, rawDistance: distance)!
+                    effectiveDistance = smoothDistance(identifier: identifier, rawDistance: distance)
                 } else {
                     effectiveDistance = distance
                 }
@@ -203,7 +204,6 @@ extension ExpoBeaconModule {
                     cancelEddystoneTimeout(identifier: identifier)
                 case .exit:
                     smoothedDistances.removeValue(forKey: identifier)
-                    print("[ExpoBeacon] DEBUG: Eddystone distance-based EXIT for \(identifier)")
                     sendLoggedEvent("onEddystoneExit", [
                         "identifier": identifier,
                         "namespace": ns,
@@ -255,10 +255,23 @@ extension ExpoBeaconModule {
             )
         } else if centralManager?.state == .poweredOn {
             centralManager?.scanForPeripherals(
-                withServices: [CBUUID(string: "FEAA")],
+                withServices: [EDDYSTONE_SERVICE_UUID],
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
             )
         }
+    }
+
+    /// Rejects an in-flight one-shot Eddystone scan and disarms its timer so a
+    /// stale timer cannot prematurely resolve a future scan. Safe to call when
+    /// no scan is active.
+    func failEddystoneScan(code: String, message: String) {
+        guard eddystoneScanPromise != nil else { return }
+        eddystoneScanTimer?.cancel()
+        eddystoneScanTimer = nil
+        eddystoneScannedBeacons.removeAll()
+        eddystoneScanPromise?.reject(code, message)
+        eddystoneScanPromise = nil
+        stopBleScanIfUnneeded()
     }
 
     func stopBleScanIfUnneeded() {
@@ -273,10 +286,14 @@ extension ExpoBeaconModule {
         eddystoneMonitoringActive = true
         ensureBleScanRunning()
 
-        // Timer to detect exit (beacon disappears from BLE advertisements)
-        eddystoneMonitoringTimer = Timer.scheduledTimer(withTimeInterval: EDDYSTONE_MONITORING_TICK_INTERVAL, repeats: true) { [weak self] _ in
+        // Timer to detect exit (beacon disappears from BLE advertisements).
+        // Add it to the main run loop explicitly — Timer.scheduledTimer uses the
+        // current thread's run loop, which only exists on the main thread.
+        let timer = Timer(timeInterval: EDDYSTONE_MONITORING_TICK_INTERVAL, repeats: true) { [weak self] _ in
             self?.eddystoneMonitoringTick()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        eddystoneMonitoringTimer = timer
     }
 
     func stopEddystoneMonitoring() {
@@ -344,7 +361,6 @@ extension ExpoBeaconModule {
                     "distance": -1
                 ]
                 sendLoggedEvent("onEddystoneExit", params)
-                print("[ExpoBeacon] DEBUG: Eddystone miss-based EXIT for \(identifier)")
                 postBeaconNotification(identifier: identifier, eventType: "exit")
                 // Beacon disappeared — cancel inactivity timer and start the timeout clock.
                 cancelEddystoneInactivity(identifier: identifier)

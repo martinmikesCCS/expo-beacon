@@ -119,12 +119,7 @@ export function CarPlayUAT() {
       },
     );
     // Reflect persisted state on mount.
-    try {
-      const isEnabled = (ExpoBeacon as any).isCarPlayMonitoringEnabled?.();
-      if (typeof isEnabled === "boolean") setEnabled(isEnabled);
-    } catch {
-      // ignore — older native build
-    }
+    setEnabled(ExpoBeacon.isCarPlayMonitoringEnabled());
     append("info", `UAT mounted (platform=${Platform.OS})`);
     return () => {
       subConn.remove();
@@ -134,7 +129,7 @@ export function CarPlayUAT() {
 
   const start = async () => {
     try {
-      await (ExpoBeacon as any).startCarPlayMonitoring();
+      await ExpoBeacon.startCarPlayMonitoring();
       setEnabled(true);
       append("info", "startCarPlayMonitoring() resolved");
     } catch (err) {
@@ -144,7 +139,7 @@ export function CarPlayUAT() {
 
   const stop = async () => {
     try {
-      await (ExpoBeacon as any).stopCarPlayMonitoring();
+      await ExpoBeacon.stopCarPlayMonitoring();
       setEnabled(false);
       append("info", "stopCarPlayMonitoring() resolved");
     } catch (err) {

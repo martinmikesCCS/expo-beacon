@@ -1,4 +1,10 @@
 import Foundation
+import CoreBluetooth
+
+// MARK: - UserDefaults suite
+
+/// Custom UserDefaults suite isolating beacon data from the host app's .standard.
+internal let BEACON_DEFAULTS_SUITE_NAME = "expo.modules.beacon"
 
 // MARK: - UserDefaults keys
 
@@ -17,11 +23,30 @@ internal let CARPLAY_MONITORING_ENABLED_KEY = "expo.beacon.carplay_monitoring_en
 /// reconcile across process recreations (e.g. background-launch wake) and emit
 /// a synthetic `onCarPlayDisconnected` if the route is no longer CarPlay.
 internal let CARPLAY_LAST_CONNECTED_KEY = "expo.beacon.carplay_last_connected"
+/// Persisted transport of the last CarPlay connect (e.g. "wired", "wireless", "unknown").
+internal let CARPLAY_LAST_TRANSPORT_KEY = "expo.beacon.carplay_last_transport"
+/// Persisted Unix-millisecond timestamp of the last CarPlay connect.
+internal let CARPLAY_LAST_CONNECTED_AT_KEY = "expo.beacon.carplay_last_connected_at"
+/// Flag marking that values were migrated from UserDefaults.standard to the suite.
+internal let SUITE_MIGRATION_FLAG_KEY = "expo.beacon.migrated_to_suite_v1"
+
+// MARK: - API forwarder keys
+
+internal let API_URL_KEY = "expo.beacon.api_url"
+internal let API_KEY_KEY = "expo.beacon.api_key"
+internal let API_ID_KEY = "expo.beacon.id"
+
+// MARK: - BLE
+
+/// Eddystone service UUID (0xFEAA) — used for scan filtering and frame extraction.
+internal let EDDYSTONE_SERVICE_UUID = CBUUID(string: "FEAA")
 
 // MARK: - Tuning thresholds
 
 /// Default minimum RSSI (dBm) below which beacon readings are discarded as unreliable.
 internal let DEFAULT_MIN_RSSI: Int = -85
+/// Default one-shot scan duration (ms) applied when the JS caller omits it.
+internal let DEFAULT_SCAN_DURATION_MS: Int = 5000
 /// Default seconds of silence after last beacon sighting before a disappearance-based exit fires.
 internal let DEFAULT_EXIT_TIMEOUT_SECONDS: TimeInterval = 300.0
 

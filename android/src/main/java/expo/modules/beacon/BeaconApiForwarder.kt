@@ -9,8 +9,8 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
-private const val API_PREFS = "expo.beacon.api_config"
 private const val API_URL_KEY = "api_url"
 private const val API_KEY_KEY = "api_key"
 private const val ID_KEY = "id"
@@ -25,7 +25,7 @@ internal class BeaconApiForwarder(private val context: Context) {
 
     private val executor = Executors.newSingleThreadExecutor()
     private val prefs: SharedPreferences by lazy {
-        context.getSharedPreferences(API_PREFS, Context.MODE_PRIVATE)
+        context.getSharedPreferences(API_CONFIG_PREFS, Context.MODE_PRIVATE)
     }
 
     fun configure(url: String, apiKey: String?, id: String? = null) {
@@ -49,9 +49,12 @@ internal class BeaconApiForwarder(private val context: Context) {
     /**
      * Send a beacon event to the configured API endpoint.
      * Fire-and-forget with simple retry (3 attempts, exponential backoff).
+     * High-frequency distance events ([eventName] onBeaconDistance /
+     * onEddystoneDistance) get a single attempt with no backoff so they
+     * cannot stall the worker thread.
      * No-op if no endpoint is configured.
      */
-    fun forwardEvent(params: Map<String, Any?>) {
+    fun forwardEvent(params: Map<String, Any?>, eventName: String? = null) {
         val url = prefs.getString(API_URL_KEY, null)
         if (url.isNullOrEmpty()) return
 
@@ -67,38 +70,48 @@ internal class BeaconApiForwarder(private val context: Context) {
             put("sdkVersion", Build.VERSION.SDK_INT)
         }
 
-        executor.execute {
-            var lastException: Exception? = null
-            for (attempt in 1..MAX_RETRIES) {
-                try {
-                    val conn = URL(url).openConnection() as HttpURLConnection
-                    conn.apply {
-                        requestMethod = "POST"
-                        setRequestProperty("Content-Type", "application/json")
-                        apiKey?.let { setRequestProperty("X-CSFR-Token", it) }
-                        connectTimeout = 10_000
-                        readTimeout = 10_000
-                        doOutput = true
+        val maxAttempts = if (eventName == "onBeaconDistance" || eventName == "onEddystoneDistance") 1 else MAX_RETRIES
+        try {
+            executor.execute {
+                var lastException: Exception? = null
+                for (attempt in 1..maxAttempts) {
+                    try {
+                        val conn = URL(url).openConnection() as HttpURLConnection
+                        conn.apply {
+                            requestMethod = "POST"
+                            setRequestProperty("Content-Type", "application/json")
+                            apiKey?.let { setRequestProperty("X-CSFR-Token", it) }
+                            connectTimeout = 10_000
+                            readTimeout = 10_000
+                            doOutput = true
+                        }
+                        OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(payload.toString()) }
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        if (code in 200..299) return@execute
+                        // 4xx client errors — don't retry
+                        if (code in 400..499) {
+                            Log.w(TAG, "API forward failed with $code — not retrying")
+                            return@execute
+                        }
+                        lastException = RuntimeException("HTTP $code")
+                    } catch (e: Exception) {
+                        lastException = e
                     }
-                    OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(payload.toString()) }
-                    val code = conn.responseCode
-                    conn.disconnect()
-                    if (code in 200..299) return@execute
-                    // 4xx client errors — don't retry
-                    if (code in 400..499) {
-                        Log.w(TAG, "API forward failed with $code — not retrying")
-                        return@execute
+                    // Exponential backoff: 1s, 2s, 4s
+                    if (attempt < maxAttempts) {
+                        try { Thread.sleep(1000L * (1 shl (attempt - 1))) } catch (_: InterruptedException) {}
                     }
-                    lastException = RuntimeException("HTTP $code")
-                } catch (e: Exception) {
-                    lastException = e
                 }
-                // Exponential backoff: 1s, 2s, 4s
-                if (attempt < MAX_RETRIES) {
-                    try { Thread.sleep(1000L * (1 shl (attempt - 1))) } catch (_: InterruptedException) {}
-                }
+                Log.w(TAG, "API forward failed after $maxAttempts attempts: ${lastException?.message}")
             }
-            Log.w(TAG, "API forward failed after $MAX_RETRIES attempts: ${lastException?.message}")
+        } catch (_: RejectedExecutionException) {
+            // shutdown() was already called — drop the event.
         }
+    }
+
+    /** Stop the worker thread. Already-queued events still run; new events are dropped. */
+    fun shutdown() {
+        executor.shutdown()
     }
 }

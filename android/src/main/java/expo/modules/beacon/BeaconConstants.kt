@@ -6,14 +6,31 @@ package expo.modules.beacon
 // ENTER_HYSTERESIS_COUNT and EXIT_HYSTERESIS_COUNT should stay in sync with
 // ExpoBeaconModule.swift (iOS).
 
+// SharedPreferences file names and keys. The string values are persisted user
+// data — never change them. CarPlayMonitor's own prefs constants live in its
+// companion (CARPLAY_MONITOR_PREFS / KEY_LAST_CONNECTED).
 internal const val PREFS_NAME = "expo.beacon.paired"
 internal const val PREFS_KEY = "paired_beacons"
 internal const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
 internal const val EDDYSTONE_PREFS_KEY = "paired_eddystones"
 internal const val NOTIFICATION_CONFIG_PREFS = "expo.beacon.notification_config"
+internal const val NOTIFICATION_CONFIG_KEY = "config"
 internal const val MONITORING_OPTIONS_PREFS = "expo.beacon.monitoring_options"
+internal const val MONITORING_OPT_MAX_DISTANCE = "max_distance"
+internal const val MONITORING_OPT_EXIT_DISTANCE = "exit_distance"
+internal const val MONITORING_OPT_MIN_RSSI = "min_rssi"
+internal const val MONITORING_OPT_LEVEL = "level"
+internal const val MONITORING_OPT_EXIT_TIMEOUT_SECONDS = "exit_timeout_seconds"
 internal const val EVENT_LOGGING_PREFS = "expo.beacon.event_logging"
 internal const val EVENT_LOGGING_ENABLED_KEY = "enabled"
+internal const val MONITORING_ACTIVE_PREFS = "expo.beacon.is_monitoring"
+internal const val MONITORING_ACTIVE_KEY = "active"
+internal const val CARPLAY_ENABLED_PREFS = "expo.beacon.carplay_enabled"
+internal const val CARPLAY_ENABLED_KEY = "enabled"
+/** Tracks what the JS layer last received — used for reconciled-disconnect on module rebind. */
+internal const val CARPLAY_JS_STATE_PREFS = "expo.beacon.carplay_js_state"
+internal const val CARPLAY_JS_STATE_KEY = "js_connected"
+internal const val API_CONFIG_PREFS = "expo.beacon.api_config"
 
 /** Foreground-service scan window for background monitoring responsiveness. */
 internal const val MONITORING_SCAN_PERIOD_MS = 1100L
@@ -58,6 +75,9 @@ internal const val DEFAULT_EXIT_TIMEOUT_SECONDS = 300.0
 
 /** Default minimum RSSI (dBm) below which beacon readings are discarded as unreliable. */
 internal const val DEFAULT_MIN_RSSI = -85
+
+/** Default one-shot scan duration (ms) applied when the JS caller omits it. */
+internal const val DEFAULT_SCAN_DURATION_MS = 5000
 
 /** Shared log tag for the expo-beacon module. */
 internal const val TAG = "ExpoBeacon"

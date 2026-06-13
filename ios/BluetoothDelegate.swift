@@ -17,13 +17,11 @@ internal final class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
             print("[ExpoBeacon] Bluetooth authorization denied — Eddystone scanning/monitoring unavailable. " +
                   "Ensure NSBluetoothAlwaysUsageDescription is set in Info.plist.")
             module?.handleBluetoothStateError(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth authorization denied — Eddystone scanning/monitoring unavailable")
-            module?.eddystoneScanPromise?.reject("BLUETOOTH_UNAUTHORIZED", "Bluetooth permission denied")
-            module?.eddystoneScanPromise = nil
+            module?.failEddystoneScan(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth permission denied")
         case .poweredOff:
             print("[ExpoBeacon] Bluetooth is powered off — Eddystone scanning/monitoring unavailable.")
             module?.handleBluetoothStateError(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off — Eddystone scanning/monitoring unavailable")
-            module?.eddystoneScanPromise?.reject("BLUETOOTH_OFF", "Bluetooth is powered off")
-            module?.eddystoneScanPromise = nil
+            module?.failEddystoneScan(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off")
         default:
             break
         }

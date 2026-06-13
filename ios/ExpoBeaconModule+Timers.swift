@@ -1,28 +1,75 @@
 import CoreLocation
 
 extension ExpoBeaconModule {
-    // MARK: - Timeout timers (fire after exit)
+    // MARK: - Shared timer plumbing
 
-    func scheduleBeaconTimeout(identifier: String, beacon: CLBeacon? = nil, region: CLBeaconRegion? = nil) {
+    /// Shared timeout scheduling for the beacon/eddystone variants, which differ
+    /// only in the timer dictionary, paired list and fire-time cleanup + payload.
+    /// `onFire` receives the module so wrappers don't capture `self` strongly
+    /// (a pending timer must not keep the module alive).
+    private func scheduleTimeout(
+        identifier: String,
+        timers: ReferenceWritableKeyPath<ExpoBeaconModule, [String: DispatchWorkItem]>,
+        pairedList: [[String: Any]],
+        onFire: @escaping (ExpoBeaconModule) -> Void
+    ) {
         // Cancel any existing timer so each exit resets the clock.
-        cancelBeaconTimeout(identifier: identifier)
+        self[keyPath: timers].removeValue(forKey: identifier)?.cancel()
 
-        let paired = loadPairedBeaconsRaw().first { ($0["identifier"] as? String) == identifier }
+        let paired = pairedList.first { ($0["identifier"] as? String) == identifier }
         guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
 
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            self.beaconTimeoutTimers.removeValue(forKey: identifier)
-            self.enteredRegions.remove(identifier)
-            self.enterCounters.removeValue(forKey: identifier)
-            self.exitCounters.removeValue(forKey: identifier)
-            self.lastSeenTimes.removeValue(forKey: identifier)
-            self.smoothedDistances.removeValue(forKey: identifier)
-            self.sendLoggedEvent("onBeaconTimeout", self.makeBeaconEventParams(identifier: identifier, beacon: beacon, region: region))
-            self.postBeaconNotification(identifier: identifier, eventType: "timeout")
+            self[keyPath: timers].removeValue(forKey: identifier)
+            onFire(self)
         }
-        beaconTimeoutTimers[identifier] = work
+        self[keyPath: timers][identifier] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds), execute: work)
+    }
+
+    /// Shared inactivity rescheduling for the beacon/eddystone variants.
+    private func rescheduleInactivity(
+        identifier: String,
+        timers: ReferenceWritableKeyPath<ExpoBeaconModule, [String: DispatchWorkItem]>,
+        timeoutTimers: ReferenceWritableKeyPath<ExpoBeaconModule, [String: DispatchWorkItem]>,
+        pairedList: [[String: Any]],
+        onFire: @escaping (ExpoBeaconModule) -> Void
+    ) {
+        self[keyPath: timers].removeValue(forKey: identifier)?.cancel()
+        // A fresh valid BLE reading means the beacon is present; discard any
+        // already-armed timeout so it cannot fire while the device is in range.
+        self[keyPath: timeoutTimers].removeValue(forKey: identifier)?.cancel()
+
+        let paired = pairedList.first { ($0["identifier"] as? String) == identifier }
+        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            self[keyPath: timers].removeValue(forKey: identifier)
+            // No BLE readings for 60 s — start the configured timeout countdown.
+            onFire(self)
+        }
+        self[keyPath: timers][identifier] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + DISTANCE_INACTIVITY_SECONDS, execute: work)
+    }
+
+    // MARK: - Timeout timers (fire after exit)
+
+    func scheduleBeaconTimeout(identifier: String, beacon: CLBeacon? = nil, region: CLBeaconRegion? = nil) {
+        scheduleTimeout(
+            identifier: identifier,
+            timers: \.beaconTimeoutTimers,
+            pairedList: loadPairedBeaconsRaw()
+        ) { module in
+            module.enteredRegions.remove(identifier)
+            module.enterCounters.removeValue(forKey: identifier)
+            module.exitCounters.removeValue(forKey: identifier)
+            module.lastSeenTimes.removeValue(forKey: identifier)
+            module.smoothedDistances.removeValue(forKey: identifier)
+            module.sendLoggedEvent("onBeaconTimeout", module.makeBeaconEventParams(identifier: identifier, beacon: beacon, region: region))
+            module.postBeaconNotification(identifier: identifier, eventType: "timeout")
+        }
     }
 
     func cancelBeaconTimeout(identifier: String) {
@@ -30,30 +77,24 @@ extension ExpoBeaconModule {
     }
 
     func scheduleEddystoneTimeout(identifier: String, namespace: String, instance: String) {
-        // Cancel any existing timer so each exit resets the clock.
-        cancelEddystoneTimeout(identifier: identifier)
-
-        let paired = loadPairedEddystonesRaw().first { ($0["identifier"] as? String) == identifier }
-        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
-
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.eddystoneTimeoutTimers.removeValue(forKey: identifier)
-            self.eddystoneEnteredRegions.remove(identifier)
-            self.eddystoneEnterCounters.removeValue(forKey: identifier)
-            self.eddystoneExitCounters.removeValue(forKey: identifier)
-            self.eddystoneLatestSeen.removeValue(forKey: identifier)
-            self.smoothedDistances.removeValue(forKey: identifier)
-            self.sendLoggedEvent("onEddystoneTimeout", [
+        scheduleTimeout(
+            identifier: identifier,
+            timers: \.eddystoneTimeoutTimers,
+            pairedList: loadPairedEddystonesRaw()
+        ) { module in
+            module.eddystoneEnteredRegions.remove(identifier)
+            module.eddystoneEnterCounters.removeValue(forKey: identifier)
+            module.eddystoneExitCounters.removeValue(forKey: identifier)
+            module.eddystoneLatestSeen.removeValue(forKey: identifier)
+            module.smoothedDistances.removeValue(forKey: identifier)
+            module.sendLoggedEvent("onEddystoneTimeout", [
                 "identifier": identifier,
                 "namespace": namespace,
                 "instance": instance,
                 "distance": -1
             ])
-            self.postBeaconNotification(identifier: identifier, eventType: "timeout")
+            module.postBeaconNotification(identifier: identifier, eventType: "timeout")
         }
-        eddystoneTimeoutTimers[identifier] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(seconds), execute: work)
     }
 
     func cancelEddystoneTimeout(identifier: String) {
@@ -63,41 +104,25 @@ extension ExpoBeaconModule {
     // MARK: - Inactivity timers (no BLE readings → start timeout countdown)
 
     func rescheduleBeaconInactivity(identifier: String, beacon: CLBeacon? = nil, region: CLBeaconRegion? = nil) {
-        cancelBeaconInactivity(identifier: identifier)
-        // A fresh valid BLE reading means the beacon is present; discard any
-        // already-armed timeout so it cannot fire while the device is in range.
-        cancelBeaconTimeout(identifier: identifier)
-
-        let paired = loadPairedBeaconsRaw().first { ($0["identifier"] as? String) == identifier }
-        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
-
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.beaconInactivityTimers.removeValue(forKey: identifier)
-            // No BLE readings for 60 s — start the configured timeout countdown.
-            self.scheduleBeaconTimeout(identifier: identifier, beacon: beacon, region: region)
+        rescheduleInactivity(
+            identifier: identifier,
+            timers: \.beaconInactivityTimers,
+            timeoutTimers: \.beaconTimeoutTimers,
+            pairedList: loadPairedBeaconsRaw()
+        ) { module in
+            module.scheduleBeaconTimeout(identifier: identifier, beacon: beacon, region: region)
         }
-        beaconInactivityTimers[identifier] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + DISTANCE_INACTIVITY_SECONDS, execute: work)
     }
 
     func rescheduleEddystoneInactivity(identifier: String, namespace: String, instance: String) {
-        cancelEddystoneInactivity(identifier: identifier)
-        // A fresh valid BLE reading means the beacon is present; discard any
-        // already-armed timeout so it cannot fire while the device is in range.
-        cancelEddystoneTimeout(identifier: identifier)
-
-        let paired = loadPairedEddystonesRaw().first { ($0["identifier"] as? String) == identifier }
-        guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
-
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.eddystoneInactivityTimers.removeValue(forKey: identifier)
-            // No BLE readings for 60 s — start the configured timeout countdown.
-            self.scheduleEddystoneTimeout(identifier: identifier, namespace: namespace, instance: instance)
+        rescheduleInactivity(
+            identifier: identifier,
+            timers: \.eddystoneInactivityTimers,
+            timeoutTimers: \.eddystoneTimeoutTimers,
+            pairedList: loadPairedEddystonesRaw()
+        ) { module in
+            module.scheduleEddystoneTimeout(identifier: identifier, namespace: namespace, instance: instance)
         }
-        eddystoneInactivityTimers[identifier] = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + DISTANCE_INACTIVITY_SECONDS, execute: work)
     }
 
     func cancelBeaconInactivity(identifier: String) {

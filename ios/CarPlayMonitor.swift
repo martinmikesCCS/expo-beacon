@@ -21,9 +21,9 @@ final class CarPlayMonitor {
     private let queue = DispatchQueue.main
 
     /// Cached ISO8601 formatter (UTC, fractional seconds). Reused across emits
-    /// to avoid per-event allocation. `ISO8601DateFormatter` is documented as
-    /// thread-safe.
-    private static let isoFormatter: ISO8601DateFormatter = {
+    /// and by `getCarPlayConnectionStatus` to format the persisted connect time.
+    /// `ISO8601DateFormatter` is documented as thread-safe.
+    static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         f.timeZone = TimeZone(identifier: "UTC")
@@ -51,7 +51,8 @@ final class CarPlayMonitor {
     /// Begin observing route changes. Idempotent — calling twice replaces the
     /// previous emit callback but does not register a duplicate observer.
     /// Emits an immediate `onCarPlayConnected` event if a CarPlay route is
-    /// already active at the time of the call.
+    /// active and the last observed state was disconnected (so repeated calls
+    /// while connected don't produce duplicate connect events).
     ///
     /// - Parameter defaults: Optional `UserDefaults` suite used to persist the
     ///   last-known connection state for cross-process reconciliation. When the
@@ -73,11 +74,16 @@ final class CarPlayMonitor {
                 }
                 os_log("CarPlay monitoring started", log: self.log, type: .info)
             }
-            // Emit current state if already connected.
+            // Emit only when the snapshot differs from the last observed state
+            // (same dedupe as handleRouteChange).
             let (connected, transport) = Self.currentCarPlayState()
-            self.isConnected = connected
-            if connected {
-                self.emitConnected(transport: transport)
+            if connected != self.isConnected {
+                self.isConnected = connected
+                if connected {
+                    self.emitConnected(transport: transport)
+                } else {
+                    self.emitDisconnected()
+                }
             }
         }
     }
@@ -121,15 +127,18 @@ final class CarPlayMonitor {
     /// Called by `BeaconCarPlaySceneDelegate.templateApplicationScene(_:didConnect:)`.
     /// Marks the entitled path as the authoritative source and emits an immediate
     /// `onCarPlayConnected` event (if not already connected from this source).
-    /// Subsequent route-change notifications from `AVAudioSession` are suppressed
-    /// for emission purposes to prevent duplicate events.
-    func notifyEntitledConnect(transport: String = "carplay-scene") {
+    /// The transport is classified from the current audio route ("wired"/"wireless"
+    /// when determinable, else "unknown"). Subsequent route-change notifications
+    /// from `AVAudioSession` are suppressed for emission purposes to prevent
+    /// duplicate events.
+    func notifyEntitledConnect() {
         queue.async { [weak self] in
             guard let self = self else { return }
             self.isEntitledMode = true
             os_log("CarPlay scene connected (entitled source)", log: self.log, type: .info)
             if !self.isConnected {
                 self.isConnected = true
+                let (_, transport) = Self.currentCarPlayState()
                 self.emitConnected(transport: transport)
             }
         }
@@ -152,16 +161,6 @@ final class CarPlayMonitor {
                 self.emitDisconnected()
             }
         }
-    }
-
-    /// Whether an entitled CarPlay scene source has notified us at least once.
-    /// Consumers (e.g. SLC/Visit auto-start logic) can skip cheap fallbacks
-    /// when the entitled real-time path is active.
-    var isUsingEntitledSource: Bool {
-        if Thread.isMainThread {
-            return isEntitledMode
-        }
-        return queue.sync { isEntitledMode }
     }
 
     /// Process a route change. When invoked from a system notification the
@@ -241,12 +240,17 @@ final class CarPlayMonitor {
 
     private func emitConnected(transport: String) {
         let now = Date()
+        let timestampMs = now.timeIntervalSince1970 * 1000.0
         let payload: [String: Any] = [
             "transport": transport,
-            "timestamp": now.timeIntervalSince1970 * 1000.0,
+            "timestamp": timestampMs,
             "timestampIso": Self.isoFormatter.string(from: now),
         ]
         persistConnectionState(true)
+        // Persist transport + connect time so getCarPlayConnectionStatus can
+        // report the actual last connect instead of fabricating one at query time.
+        defaults?.set(transport, forKey: CARPLAY_LAST_TRANSPORT_KEY)
+        defaults?.set(timestampMs, forKey: CARPLAY_LAST_CONNECTED_AT_KEY)
         emit?("onCarPlayConnected", payload)
     }
 

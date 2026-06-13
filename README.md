@@ -8,7 +8,7 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
 | **Pair** | Register specific beacons for persistent tracking — survives app restarts |
 | **Monitor** | Background enter/exit region detection with distance-based filtering |
 | **Distance** | Real-time distance updates (~1/sec) while monitoring |
-| **Timeout** | Fire a one-shot event after a beacon stays in range for a configured duration |
+| **Timeout** | Fire a one-shot event after a beacon has been out of range for a configured duration |
 | **Event Logging** | Persist every beacon event to a local SQLite database for diagnostics & replay |
 | **Notifications** | Automatic local notifications on region enter/exit, fully customisable |
 
@@ -16,7 +16,7 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
 |---|---|
 | **Android** | [AltBeacon](https://altbeacon.github.io/android-beacon-library/) library + Foreground Service |
 | **iOS** | CoreLocation (iBeacon ranging & monitoring) + CoreBluetooth (Eddystone & wildcard BLE) |
-| **Web** | Not supported (throws on all calls) |
+| **Web** | Not supported (async methods reject, sync getters return inert defaults, everything else throws) |
 
 ---
 
@@ -27,6 +27,9 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [iOS](#ios)
   - [Android](#android)
 - [Quick Start](#quick-start)
+- [React Hooks](#react-hooks)
+  - [useBeacon()](#usebeacon)
+  - [useCarPlay()](#usecarplay)
 - [Usage Examples](#usage-examples)
   - [Scanning for iBeacons](#scanning-for-ibeacons)
   - [Scanning for Eddystone Beacons](#scanning-for-eddystone-beacons)
@@ -61,6 +64,7 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [getEventLogs()](#geteventlogsoptions)
   - [clearEventLogs()](#cleareventlogs)
   - [destroyEventLogs()](#destroyeventlogs)
+  - [setApiEndpoint()](#setapiendpointurl-apikey-id)
 - [Events](#events)
 - [TypeScript Types](#typescript-types)
 - [Native Integrations](#native-integrations)
@@ -108,6 +112,8 @@ In Xcode under **Signing & Capabilities**, enable:
 
 - **Background Modes → Location updates**
 - **Background Modes → Uses Bluetooth LE accessories**
+
+> When the bundled config plugin is installed (`"plugins": ["expo-beacon"]`), `location` is merged into `UIBackgroundModes` automatically on `expo prebuild` — the native module only enables background ranging when this mode is present.
 
 #### Key iOS Constraints
 
@@ -194,6 +200,133 @@ export default function App() {
 
 ---
 
+## React Hooks
+
+For React / React Native apps the package ships two hooks that wrap the
+imperative API, manage event subscriptions (with automatic cleanup), and expose
+the relevant state reactively. Import them directly from the package:
+
+```ts
+import { useBeacon, useCarPlay } from "expo-beacon";
+```
+
+Both hooks accept optional event callbacks. Callbacks are read from a ref, so
+passing fresh inline functions on every render does **not** re-subscribe the
+underlying native listeners.
+
+### useBeacon()
+
+Manages scanning and background monitoring. It keeps the paired-beacon lists,
+the set of beacons currently in range, and the monitoring flag in sync, and
+returns stable action wrappers.
+
+```tsx
+import { useBeacon } from "expo-beacon";
+
+function BeaconScreen() {
+  const {
+    inRange,
+    isMonitoring,
+    pairedBeacons,
+    requestPermissions,
+    pairBeacon,
+    startMonitoring,
+    stopMonitoring,
+  } = useBeacon({
+    onBeaconEnter: (e) => console.log("entered", e.identifier, e.distance),
+    onBeaconExit: (e) => console.log("exited", e.identifier),
+    onError: (e) => console.warn(`[${e.code}] ${e.message}`),
+  });
+
+  return (
+    <View>
+      <Button title="Grant permissions" onPress={requestPermissions} />
+      <Button
+        title={isMonitoring ? "Stop monitoring" : "Start monitoring"}
+        onPress={() => (isMonitoring ? stopMonitoring() : startMonitoring())}
+      />
+      {inRange.map((b) => (
+        <Text key={b.identifier}>
+          {b.identifier} — {b.distance >= 0 ? `${b.distance.toFixed(1)}m` : "n/a"}
+        </Text>
+      ))}
+    </View>
+  );
+}
+```
+
+| Returned value | Description |
+| --- | --- |
+| `pairedBeacons` / `pairedEddystones` | Reactive lists of paired devices. |
+| `inRange` | Paired beacons currently in range, derived live from enter/exit/distance/timeout events (`InRangeBeacon[]`). |
+| `isMonitoring` | Whether background monitoring is active. |
+| `isEventLoggingEnabled` | Whether SQLite event logging is enabled (kept in sync by the logging actions). |
+| `refreshPaired()` | Re-read the paired lists from native. |
+| `pairBeacon()` / `unpairBeacon()` | Pair / unpair an iBeacon, then refresh. |
+| `pairEddystone()` / `unpairEddystone()` | Pair / unpair an Eddystone, then refresh. |
+| `scanForBeacons()` / `scanForEddystones()` | One-shot scans returning a promise. |
+| `startContinuousScan()` / `stopContinuousScan()` | Live scan; results arrive via `onBeaconFound` / `onEddystoneFound`. |
+| `cancelScan()` | Cancel an in-progress one-shot scan. |
+| `startMonitoring()` / `stopMonitoring()` | Start / stop background monitoring. |
+| `getMonitoringConfig()` | Read the current monitoring config + active-state snapshot. |
+| `getMonitoredDeviceState()` / `getMonitoredDeviceStates()` | Native state snapshot for one / all paired devices. |
+| `setNotificationConfig()` | Persist notification configuration for monitoring sessions. |
+| `enableEventLogging()` / `disableEventLogging()` | Toggle SQLite logging (updates `isEventLoggingEnabled`). |
+| `getEventLogs()` / `clearEventLogs()` / `destroyEventLogs()` | Read / clear / drop the persisted event log. |
+| `setApiEndpoint()` / `getApiEndpoint()` | Configure / read the native event-forwarding endpoint. |
+| `isBatteryOptimizationExempt()` / `requestBatteryOptimizationExemption()` | Check / request Android battery-optimization exemption. |
+| `requestPermissions()` | Request the permissions needed for scanning / monitoring. |
+
+`inRange` reflects **monitored (paired)** beacons only. Continuous-scan results
+are delivered through the `onBeaconFound` / `onEddystoneFound` callbacks because
+raw scan hits carry no paired identifier. Pass `track: false` to skip `inRange`
+bookkeeping when you only need the callbacks.
+
+### useCarPlay()
+
+Observes CarPlay / Android Auto connection state. It initializes from the
+persisted native state on mount and tracks live connect / disconnect events.
+
+```tsx
+import { useCarPlay } from "expo-beacon";
+
+function CarPlayBadge() {
+  const { connected, transport, isMonitoring, startMonitoring, stopMonitoring } =
+    useCarPlay({
+      onConnected: (e) => console.log("car connected via", e.transport),
+      onDisconnected: () => console.log("car disconnected"),
+    });
+
+  return (
+    <View>
+      <Text>{connected ? `Connected (${transport})` : "Not connected"}</Text>
+      <Button
+        title={isMonitoring ? "Stop" : "Start"}
+        onPress={() => (isMonitoring ? stopMonitoring() : startMonitoring())}
+      />
+    </View>
+  );
+}
+```
+
+| Returned value | Description |
+| --- | --- |
+| `connected` | Whether a CarPlay / Android Auto session is active. |
+| `transport` | Transport of the active session (`CarPlayTransport`), or `null`. |
+| `isMonitoring` | Whether persistent monitoring is enabled. |
+| `lastConnectedAt` / `lastDisconnectedAt` | Epoch-ms timestamps of the last transitions, or `null`. |
+| `startMonitoring()` / `stopMonitoring()` | Enable / disable monitoring. |
+| `refresh()` | Re-read the connection + monitoring state from native. |
+| `getDiagnostics()` | Fetch detection diagnostics for troubleshooting. |
+
+Pass `autoStart: true` to call `startCarPlayMonitoring()` on mount when it is
+not already enabled.
+
+> Both hooks are safe to call on web: the underlying module is a no-op stub
+> there, so the hooks simply report empty / disconnected state.
+
+---
+
 ## Usage Examples
 
 ### Scanning for iBeacons
@@ -220,7 +353,8 @@ beacons.forEach((b) => {
 #### Wildcard scan (Android only)
 
 ```ts
-// Pass an empty array to discover ALL nearby iBeacons
+// Pass an empty array (or omit the arguments — defaults are uuids = [],
+// scanDuration = 5000) to discover ALL nearby iBeacons.
 // On iOS, this auto-uses UUIDs from paired beacons
 const beacons = await ExpoBeacon.scanForBeaconsAsync([], 5000);
 ```
@@ -567,7 +701,7 @@ await ExpoBeacon.startMonitoring({
 
 ### Beacon Timeout
 
-Pair a beacon with `timeoutSeconds` to fire a one-shot event after the beacon has been continuously in range for that duration. The timer resets if the beacon exits and re-enters range.
+Pair a beacon with `timeoutSeconds` to fire a one-shot event after the beacon has been out of range for that duration. The countdown is armed when the beacon exits range (or when no BLE readings arrive for 60 seconds, e.g. due to Doze mode or background throttling) and is cancelled if the beacon is seen again before it fires.
 
 ```tsx
 import { useEffect } from "react";
@@ -581,7 +715,7 @@ ExpoBeacon.pairBeacon(
   1,
   100,
   undefined,      // name (optional)
-  30,             // timeoutSeconds — fires after 30 s in range
+  30,             // timeoutSeconds — fires 30 s after the beacon leaves range
 );
 
 // Pair Eddystone with a 60-second timeout
@@ -590,7 +724,7 @@ ExpoBeacon.pairEddystone(
   "edd1ebeac04e5defa017",
   "0123456789ab",
   undefined,      // name (optional)
-  60,             // timeoutSeconds — fires after 60 s in range
+  60,             // timeoutSeconds — fires 60 s after the beacon leaves range
 );
 
 // Listen for the timeout events
@@ -598,13 +732,13 @@ useEffect(() => {
   const beaconTimeout = ExpoBeacon.addListener(
     "onBeaconTimeout",
     (e: BeaconTimeoutEvent) => {
-      console.log(`Beacon "${e.identifier}" in range for configured duration! dist: ${e.distance.toFixed(1)}m`);
+      console.log(`Beacon "${e.identifier}" out of range for configured duration!`);
     },
   );
   const eddystoneTimeout = ExpoBeacon.addListener(
     "onEddystoneTimeout",
     (e: EddystoneTimeoutEvent) => {
-      console.log(`Eddystone "${e.identifier}" in range for configured duration!`);
+      console.log(`Eddystone "${e.identifier}" out of range for configured duration!`);
     },
   );
 
@@ -615,7 +749,7 @@ useEffect(() => {
 }, []);
 ```
 
-> **Note**: The timeout fires once per enter cycle. If the beacon exits and re-enters range, the timer starts over.
+> **Note**: The timeout fires once per exit. If the beacon re-enters range before the countdown completes, the pending timer is cancelled and re-armed on the next exit.
 
 ---
 
@@ -774,13 +908,11 @@ If you need to disable this (e.g. you already ship your own Android Auto templat
 If `onCarPlayConnected` never fires on Android, call `getCarPlayDiagnostics()` to inspect the native state:
 
 ```ts
-const d = await ExpoBeacon.getCarPlayDiagnostics();
+const d = ExpoBeacon.getCarPlayDiagnostics();
 // {
-//   platform: "android",
-//   carPlayEnabled: true,
 //   isCarAppMetadataPresent: true,   // false → config plugin didn't run; prebuild again
 //   isCarProviderQueryable: true,    // false → Android Auto app not installed on device
-//   lastRawConnectionType: 0,        // 0=DISCONNECTED 1=PROJECTION 2=NATIVE
+//   lastRawConnectionType: 2,        // 0=NOT_CONNECTED 1=NATIVE (AAOS) 2=PROJECTION; null = no value yet
 //   observerActive: true,
 //   serviceAlive: true,
 // }
@@ -802,8 +934,8 @@ Requests all permissions required for scanning and monitoring.
 
 | Platform | Permissions Requested |
 |---|---|
-| **Android** | `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT`, `ACCESS_FINE_LOCATION`, `POST_NOTIFICATIONS` (API 33+) |
-| **iOS** | `CLLocationManager` "When In Use" → "Always" authorization (two-step prompt) |
+| **Android** | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` (API 31+), `POST_NOTIFICATIONS` (API 33+), then `ACCESS_BACKGROUND_LOCATION` (API 29+) in a second prompt. Resolves `true` only when background location is granted. |
+| **iOS** | `CLLocationManager` "When In Use" authorization — resolves `true` once granted. The "Always" upgrade is requested later by `startMonitoring()`, and Bluetooth permission is not prompted here. |
 
 **Returns**: `true` if all required permissions were granted.
 
@@ -825,6 +957,8 @@ scanForBeaconsAsync(uuids?: string[], scanDurationMs?: number): Promise<BeaconSc
 ```
 
 Performs a **one-shot iBeacon scan**. Waits for the specified duration, then resolves with all discovered beacons.
+
+Both parameters are optional — the defaults are applied on the JS side before the native call.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -865,6 +999,8 @@ scanForEddystonesAsync(scanDurationMs?: number): Promise<EddystoneScanResult[]>
 ```
 
 Performs a **one-shot Eddystone scan** using BLE. Discovers both Eddystone-UID and Eddystone-URL frames.
+
+The parameter is optional — the default is applied on the JS side before the native call.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
@@ -932,19 +1068,19 @@ Registers an iBeacon for persistent monitoring.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `identifier` | `string` | Unique label (e.g. `"lobby-entrance"`). Re-using an identifier replaces the previous entry. |
+| `identifier` | `string` | Unique label (e.g. `"lobby-entrance"`). Re-using an iBeacon identifier replaces the previous entry. |
 | `uuid` | `string` | iBeacon proximity UUID (case-insensitive, e.g. `"E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"`) |
 | `major` | `number` | Major value: `0`–`65535` |
 | `minor` | `number` | Minor value: `0`–`65535` |
 | `name` | `string?` | Optional BLE device name for display purposes |
-| `timeoutSeconds` | `number?` | Fire `onBeaconTimeout` once after the beacon stays in range this many seconds. Timer resets on exit/re-enter. |
+| `timeoutSeconds` | `number?` | Fire `onBeaconTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first. |
 
-**Possible errors**: `INVALID_UUID`, `INVALID_MAJOR`, `INVALID_MINOR`.
+**Possible errors**: `INVALID_UUID`, `INVALID_MAJOR`, `INVALID_MINOR`, `DUPLICATE_IDENTIFIER` (identifier already used by a paired Eddystone).
 
 ```ts
 ExpoBeacon.pairBeacon("main-door", "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0", 1, 42);
 
-// With timeout — fires onBeaconTimeout after 30 s in range
+// With timeout — fires onBeaconTimeout 30 s after the beacon leaves range
 ExpoBeacon.pairBeacon("main-door", "E2C56DB5-DFFB-48D2-B060-D0F5A71096E0", 1, 42, undefined, 30);
 ```
 
@@ -989,22 +1125,22 @@ const paired = ExpoBeacon.getPairedBeacons();
 pairEddystone(identifier: string, namespace: string, instance: string, name?: string, timeoutSeconds?: number): void
 ```
 
-Registers an Eddystone-UID beacon for persistent monitoring.
+Registers an Eddystone-UID beacon for persistent monitoring. The namespace and instance are normalized to lowercase before storage.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `identifier` | `string` | Unique label (e.g. `"meeting-room"`) |
+| `identifier` | `string` | Unique label (e.g. `"meeting-room"`). Re-using an Eddystone identifier replaces the previous entry. |
 | `namespace` | `string` | 10-byte namespace ID as hex string — must be exactly **20 hex characters** |
 | `instance` | `string` | 6-byte instance ID as hex string — must be exactly **12 hex characters** |
 | `name` | `string?` | Optional BLE device name for display purposes |
-| `timeoutSeconds` | `number?` | Fire `onEddystoneTimeout` once after the beacon stays in range this many seconds. Timer resets on exit/re-enter. |
+| `timeoutSeconds` | `number?` | Fire `onEddystoneTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first. |
 
-**Possible errors**: `INVALID_NAMESPACE`, `INVALID_INSTANCE`.
+**Possible errors**: `INVALID_NAMESPACE`, `INVALID_INSTANCE`, `DUPLICATE_IDENTIFIER` (identifier already used by a paired iBeacon).
 
 ```ts
 ExpoBeacon.pairEddystone("meeting-room", "edd1ebeac04e5defa017", "0123456789ab");
 
-// With timeout — fires onEddystoneTimeout after 60 s in range
+// With timeout — fires onEddystoneTimeout 60 s after the beacon leaves range
 ExpoBeacon.pairEddystone("meeting-room", "edd1ebeac04e5defa017", "0123456789ab", undefined, 60);
 ```
 
@@ -1101,7 +1237,7 @@ await ExpoBeacon.startMonitoring();
 stopMonitoring(): Promise<void>
 ```
 
-Stops all background monitoring. On Android, stops the foreground service.
+Stops all background monitoring. On Android, stops the foreground service. Persisted monitoring options (`maxDistance`, `exitDistance`, `level`, `exitTimeoutSeconds`, …) are cleared on both platforms.
 
 ```ts
 await ExpoBeacon.stopMonitoring();
@@ -1271,6 +1407,24 @@ ExpoBeacon.destroyEventLogs();
 
 ---
 
+### `setApiEndpoint(url, apiKey?, id?)`
+
+```ts
+setApiEndpoint(url: string, apiKey?: string, id?: string): void
+```
+
+Configures a remote endpoint to which native code POSTs every beacon event — delivery works even when the JS bridge is not active (app backgrounded). The configuration persists until changed.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `url` | `string` | The API endpoint URL to POST events to. |
+| `apiKey` | `string?` | Sent as the `X-CSFR-Token` header (sic — the header is literally `X-CSFR-Token`, not `X-CSRF-Token`). |
+| `id` | `string?` | Identifier appended to every forwarded event payload. |
+
+Use `getApiEndpoint()` to read back the current configuration (each field is `null` if unset).
+
+---
+
 ## Events
 
 Subscribe with `ExpoBeacon.addListener(eventName, handler)`. Always call `.remove()` on the returned subscription during cleanup.
@@ -1293,8 +1447,8 @@ sub.remove();
 | `onEddystoneEnter` | Paired Eddystone enters range (respects `maxDistance`) | `EddystoneRegionEvent` |
 | `onEddystoneExit` | Paired Eddystone leaves range (always fires) | `EddystoneRegionEvent` |
 | `onEddystoneDistance` | Periodic Eddystone distance update during monitoring | `EddystoneDistanceEvent` |
-| `onBeaconTimeout` | Paired iBeacon in range for configured `timeoutSeconds` | `BeaconTimeoutEvent` |
-| `onEddystoneTimeout` | Paired Eddystone in range for configured `timeoutSeconds` | `EddystoneTimeoutEvent` |
+| `onBeaconTimeout` | Paired iBeacon out of range for configured `timeoutSeconds` | `BeaconTimeoutEvent` |
+| `onEddystoneTimeout` | Paired Eddystone out of range for configured `timeoutSeconds` | `EddystoneTimeoutEvent` |
 
 ### Event Detail
 
@@ -1391,25 +1545,25 @@ ExpoBeacon.addListener("onEddystoneDistance", (e) => {
 
 #### `onBeaconTimeout`
 
-Fired **once** when a paired iBeacon has been continuously in range for its configured `timeoutSeconds` duration. The timer resets on exit/re-enter.
+Fired **once**, `timeoutSeconds` after a paired iBeacon exits range (or after BLE readings stop for 60 s). Re-detection cancels the pending timer.
 
 ```ts
 ExpoBeacon.addListener("onBeaconTimeout", (e) => {
   // e.identifier — "lobby-entrance"
   // e.uuid, e.major, e.minor — beacon identity
-  // e.distance — metres at the moment the timeout fired
-  console.log(`Beacon "${e.identifier}" timeout — in range for configured duration`);
+  // e.distance — usually –1 (the beacon is out of range when this fires)
+  console.log(`Beacon "${e.identifier}" timeout — out of range for configured duration`);
 });
 ```
 
 #### `onEddystoneTimeout`
 
-Fired **once** when a paired Eddystone has been continuously in range for its configured `timeoutSeconds` duration.
+Fired **once**, `timeoutSeconds` after a paired Eddystone exits range (or after BLE readings stop for 60 s). Re-detection cancels the pending timer.
 
 ```ts
 ExpoBeacon.addListener("onEddystoneTimeout", (e) => {
   // e.identifier, e.namespace, e.instance — Eddystone identity
-  // e.distance — metres at the moment the timeout fired (–1 if unavailable)
+  // e.distance — usually –1 (the beacon is out of range when this fires)
   console.log(`Eddystone "${e.identifier}" timeout`);
 });
 ```
@@ -1433,6 +1587,7 @@ import type {
   EddystoneRegionEvent,
   EddystoneDistanceEvent,
   EddystoneTimeoutEvent,
+  BeaconErrorEvent,
   ExpoBeaconModuleEvents,
   MonitoringOptions,
   NotificationConfig,
@@ -1454,8 +1609,8 @@ type BeaconScanResult = {
   major: number;     // 0–65535
   minor: number;     // 0–65535
   rssi: number;      // Signal strength in dBm (negative, e.g. –65)
-  distance: number;  // Estimated distance in metres
-  txPower: number;   // Calibrated TX power from the advertisement
+  distance: number;  // Estimated distance in metres (–1 when unavailable)
+  txPower: number;   // Calibrated TX power. Android only — always 0 on iOS (CoreLocation does not expose it)
 };
 ```
 
@@ -1470,7 +1625,7 @@ type PairedBeacon = {
   major: number;
   minor: number;
   name?: string;           // Optional BLE device name
-  timeoutSeconds?: number; // Fires onBeaconTimeout after this duration in range
+  timeoutSeconds?: number; // Fires onBeaconTimeout this many seconds after the beacon exits range
 };
 ```
 
@@ -1529,7 +1684,7 @@ type PairedEddystone = {
   namespace: string;   // 20 hex chars
   instance: string;    // 12 hex chars
   name?: string;           // Optional BLE device name
-  timeoutSeconds?: number; // Fires onEddystoneTimeout after this duration in range
+  timeoutSeconds?: number; // Fires onEddystoneTimeout this many seconds after the beacon exits range
 };
 ```
 
@@ -1670,7 +1825,7 @@ type BeaconTimeoutEvent = {
   uuid: string;
   major: number;
   minor: number;
-  distance: number; // Metres at timeout fire (–1 if unavailable)
+  distance: number; // Usually –1 (the beacon is out of range when the timeout fires)
 };
 ```
 
@@ -1683,7 +1838,7 @@ type EddystoneTimeoutEvent = {
   identifier: string;
   namespace: string;
   instance: string;
-  distance: number; // Metres at timeout fire (–1 if unavailable)
+  distance: number; // Usually –1 (the beacon is out of range when the timeout fires)
 };
 ```
 
@@ -1737,13 +1892,13 @@ Follow [react-native-background-geolocation's native setup](https://transistorso
 
 #### 2. Add the Expo config plugin
 
-In `app.json` (or `app.config.js`), add `expo-beacon/plugin/withBeaconBGLocation` to your plugins list:
+In `app.json` (or `app.config.js`), add `expo-beacon` to your plugins list:
 
 ```json
 {
   "expo": {
     "plugins": [
-      "expo-beacon/plugin/withBeaconBGLocation"
+      "expo-beacon"
     ]
   }
 }
@@ -1755,7 +1910,28 @@ Then run prebuild to apply the native changes:
 npx expo prebuild --clean
 ```
 
-The plugin writes `BeaconGeoPlugin.swift` / `BeaconGeoPlugin.kt` into your native project and wires them up in `AppDelegate.swift` and `MainApplication.kt` automatically.
+The plugin writes `BeaconGeoPlugin.swift` / `BeaconGeoPlugin.kt` into your native project and wires them up in `AppDelegate.swift` and `MainApplication.kt` automatically. It also merges `location` into the iOS `UIBackgroundModes` (required for background ranging) and registers the app as Android-Auto-aware (see [CarPlay / Android Auto Detection](#carplay--android-auto-detection)).
+
+> **Java projects**: the `MainApplication` patch is Kotlin-only. If your project still uses `MainApplication.java`, the plugin skips the patch and you must add `BeaconPluginRegistry.register(BeaconGeoPlugin(this))` manually.
+
+##### The `backgroundGeolocation` prop
+
+The `BeaconGeoPlugin` generation requires `react-native-background-geolocation` to be installed — without it, the generated native files fail to compile. If you don't use that library, disable the integration with the `backgroundGeolocation` prop (default: `true`):
+
+```json
+{
+  "expo": {
+    "plugins": [
+      ["expo-beacon", {
+        "ios": { "backgroundGeolocation": false },
+        "android": { "backgroundGeolocation": false }
+      }]
+    ]
+  }
+}
+```
+
+Setting it to `false` skips the `BeaconGeoPlugin.swift` / `BeaconGeoPlugin.kt` generation and the `AppDelegate.swift` / `MainApplication.kt` patches. The `UIBackgroundModes` merge and the Android Auto registration are applied regardless of this prop.
 
 #### 3. Configure BGLocation once at JS startup
 
@@ -1796,18 +1972,42 @@ import ExpoBeacon
 import TSLocationManager
 
 final class BeaconGeoPlugin: BeaconLifecycleDelegate {
-    func beaconDidEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
-        TSLocationManager.sharedManager().start()
-    }
-    func beaconDidExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
-        TSLocationManager.sharedManager().stop()
-    }
-    func eddystoneDidEnter(identifier: String, namespace: String, instance: String, distance: Double) {
-        TSLocationManager.sharedManager().start()
-    }
-    func eddystoneDidExit(identifier: String, namespace: String, instance: String, distance: Double) {
-        TSLocationManager.sharedManager().stop()
-    }
+  private func startTracking() {
+    BackgroundGeolocation.sharedInstance().start()
+    BackgroundGeolocation.sharedInstance().changePace(true)
+  }
+
+  private func stopTracking() {
+    BackgroundGeolocation.sharedInstance().changePace(false)
+    BackgroundGeolocation.sharedInstance().stop()
+  }
+
+  func beaconDidEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+    startTracking()
+  }
+  func beaconDidExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+    stopTracking()
+  }
+  func beaconDidTimeout(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) {
+    stopTracking()
+  }
+  func eddystoneDidEnter(identifier: String, namespace: String, instance: String, distance: Double) {
+    startTracking()
+  }
+  func eddystoneDidExit(identifier: String, namespace: String, instance: String, distance: Double) {
+    stopTracking()
+  }
+  func eddystoneDidTimeout(identifier: String, namespace: String, instance: String, distance: Double) {
+    stopTracking()
+  }
+  // Start tracking when the device connects to CarPlay (wired or wireless),
+  // stop when it disconnects.
+  func carPlayDidConnect(transport: String) {
+    startTracking()
+  }
+  func carPlayDidDisconnect() {
+    stopTracking()
+  }
 }
 ```
 
@@ -1828,19 +2028,35 @@ package com.yourapp
 
 import android.content.Context
 import com.transistorsoft.locationmanager.adapter.BackgroundGeolocation
+import com.transistorsoft.locationmanager.adapter.callback.TSCallback
 import expo.modules.beacon.BeaconEventPlugin
 
 class BeaconGeoPlugin(ctx: Context) : BeaconEventPlugin {
     private val bgGeo = BackgroundGeolocation.getInstance(ctx, null)
+    private val noOp = object : TSCallback {
+        override fun onSuccess() {}
+        override fun onFailure(error: String) {}
+    }
 
     override fun onBeaconEnter(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
-        bgGeo.start(null)
+        bgGeo.start(noOp)
     override fun onBeaconExit(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
-        bgGeo.stop(null)
+        bgGeo.stop(noOp)
+    override fun onBeaconTimeout(identifier: String, uuid: String, major: Int, minor: Int, distance: Double) =
+        bgGeo.stop(noOp)
     override fun onEddystoneEnter(identifier: String, namespace: String, instance: String, distance: Double) =
-        bgGeo.start(null)
+        bgGeo.start(noOp)
     override fun onEddystoneExit(identifier: String, namespace: String, instance: String, distance: Double) =
-        bgGeo.stop(null)
+        bgGeo.stop(noOp)
+    override fun onEddystoneTimeout(identifier: String, namespace: String, instance: String, distance: Double) =
+        bgGeo.stop(noOp)
+    // Start tracking when the device connects to Android Auto, stop when it disconnects.
+    override fun onCarPlayConnected(transport: String) {
+        bgGeo.start(noOp)
+    }
+    override fun onCarPlayDisconnected() {
+        bgGeo.stop(noOp)
+    }
 }
 ```
 
@@ -1878,7 +2094,7 @@ override fun onCreate() {
 |---|---|
 | Region monitoring | iOS wakes/relaunches the app on region boundary crossings — even if force-quit. |
 | BLE scanning | Eddystones are monitored via CoreBluetooth. Works reliably in foreground; may be throttled when the app is suspended. |
-| Background modes | `allowsBackgroundLocationUpdates = true`, `pausesLocationUpdatesAutomatically = false` |
+| Background modes | `allowsBackgroundLocationUpdates` is only enabled when `UIBackgroundModes` contains `location` (the config plugin adds it on prebuild); `pausesLocationUpdatesAutomatically = false` |
 | Region limit | 20 simultaneous `CLBeaconRegion` registrations max. Eddystones don't count. |
 
 ---
@@ -1915,7 +2131,7 @@ Both the foreground service and enter/exit alerts share the channel ID `expo_bea
 
 1. **iBeacon scanning requires UUIDs**: Apple's CoreBluetooth strips iBeacon manufacturer data from BLE advertisements. The module uses `CLLocationManager` ranging with `CLBeaconIdentityConstraint`, which requires known UUIDs. Wildcard iBeacon discovery is architecturally impossible on iOS.
 
-2. **Two-step location permission**: iOS requires requesting "When In Use" first, then upgrading to "Always". The module handles this automatically via a two-step flow in `requestPermissionsAsync()`.
+2. **Two-step location permission**: iOS requires requesting "When In Use" first, then upgrading to "Always". `requestPermissionsAsync()` requests (and resolves `true` with) "When In Use"; the "Always" upgrade prompt is triggered by `startMonitoring()`.
 
 3. **20 region limit**: `CLLocationManager` enforces a hard limit of 20 monitored `CLBeaconRegion` regions across all apps. If your app pairs more than 20 iBeacons, only the first 20 will be actively monitored. Plan your beacon deployment accordingly.
 
@@ -1995,6 +2211,7 @@ The module uses hysteresis (3 consecutive readings) to prevent jitter. If you're
 | `INVALID_MINOR` | `pairBeacon` | Minor value not in range 0–65535. |
 | `INVALID_NAMESPACE` | `pairEddystone` | Namespace must be exactly 20 hex characters. |
 | `INVALID_INSTANCE` | `pairEddystone` | Instance must be exactly 12 hex characters. |
+| `DUPLICATE_IDENTIFIER` | `pairBeacon`, `pairEddystone` | The identifier is already used by a paired beacon of the other type. |
 | `PERMISSION_DENIED` | `scanForBeaconsAsync`, `startMonitoring` | Required permissions were not granted. |
 | `WILDCARD_NOT_SUPPORTED` | `scanForBeaconsAsync` | iOS only: no UUIDs provided and no paired beacons exist. |
 

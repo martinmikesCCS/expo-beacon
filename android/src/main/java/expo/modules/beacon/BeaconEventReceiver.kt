@@ -6,7 +6,9 @@ import android.content.Intent
 
 /**
  * Receives ACTION_BEACON_EVENT broadcasts from BeaconForegroundService
- * and forwards them to the Expo module event system.
+ * and forwards them to the Expo module event system. The service puts the
+ * resolved JS event name and the ready-made payload bundle in the intent,
+ * so this receiver only unpacks them.
  *
  * Architecture note: System broadcasts (scoped via setPackage + RECEIVER_NOT_EXPORTED)
  * are used rather than LocalBroadcastManager or a bound-service callback because the
@@ -20,69 +22,13 @@ class BeaconEventReceiver(
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_BEACON_EVENT) return
 
-        val identifier = intent.getStringExtra("identifier") ?: return
-        val eventType = intent.getStringExtra("event") ?: return
-
-        // Handle error events uniformly — no beacon coordinates needed
-        if (eventType == "error") {
-            val errorCode = intent.getStringExtra("errorCode") ?: ""
-            val errorMessage = intent.getStringExtra("errorMessage") ?: ""
-            onEvent("onBeaconError", mapOf(
-                "identifier" to identifier,
-                "code" to errorCode,
-                "message" to errorMessage
-            ))
-            return
+        val eventName = intent.getStringExtra(EXTRA_EVENT_NAME) ?: return
+        val bundle = intent.getBundleExtra(EXTRA_EVENT_PARAMS) ?: return
+        val params = mutableMapOf<String, Any>()
+        for (key in bundle.keySet()) {
+            @Suppress("DEPRECATION")
+            bundle.get(key)?.let { params[key] = it }
         }
-
-        val beaconType = intent.getStringExtra("beaconType") ?: "ibeacon"
-        val distance = intent.getDoubleExtra("distance", -1.0)
-        val rssi = intent.getIntExtra("rssi", 0)
-
-        if (beaconType == "eddystone") {
-            val namespace = intent.getStringExtra("namespace") ?: ""
-            val instance = intent.getStringExtra("instance") ?: ""
-
-            val params = mapOf(
-                "identifier" to identifier,
-                "namespace" to namespace,
-                "instance" to instance,
-                "event" to eventType,
-                "distance" to distance,
-                "rssi" to rssi
-            )
-
-            val eventName = when (eventType) {
-                "enter" -> "onEddystoneEnter"
-                "exit" -> "onEddystoneExit"
-                "distance" -> "onEddystoneDistance"
-                "timeout" -> "onEddystoneTimeout"
-                else -> return
-            }
-            onEvent(eventName, params)
-        } else {
-            val uuid = intent.getStringExtra("uuid") ?: ""
-            val major = intent.getIntExtra("major", 0)
-            val minor = intent.getIntExtra("minor", 0)
-
-            val params = mapOf(
-                "identifier" to identifier,
-                "uuid" to uuid,
-                "major" to major,
-                "minor" to minor,
-                "event" to eventType,
-                "distance" to distance,
-                "rssi" to rssi
-            )
-
-            val eventName = when (eventType) {
-                "enter" -> "onBeaconEnter"
-                "exit" -> "onBeaconExit"
-                "distance" -> "onBeaconDistance"
-                "timeout" -> "onBeaconTimeout"
-                else -> return
-            }
-            onEvent(eventName, params)
-        }
+        onEvent(eventName, params)
     }
 }
