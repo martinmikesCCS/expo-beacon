@@ -14,6 +14,10 @@ import {
   EventLogEntry,
   CarPlayConnectionStatus,
   CarPlayDiagnostics,
+  BeaconNotificationConfig,
+  BeaconNotificationSettings,
+  CarPlayNotificationConfig,
+  CarPlayNotificationSettings,
 } from "./ExpoBeacon.types";
 
 export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
@@ -40,9 +44,7 @@ export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvent
    *
    * @param scanDuration Duration in ms (default 5000)
    */
-  scanForEddystonesAsync(
-    scanDuration?: number,
-  ): Promise<EddystoneScanResult[]>;
+  scanForEddystonesAsync(scanDuration?: number): Promise<EddystoneScanResult[]>;
 
   /**
    * Register a beacon for persistent region monitoring.
@@ -101,6 +103,22 @@ export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvent
    * subsequent monitoring sessions until explicitly changed.
    */
   setNotificationConfig(config: NotificationConfig): void;
+
+  /**
+   * Persist only beacon notification settings without replacing CarPlay settings.
+   * Passing a plain BeaconNotificationConfig is treated as the beacon event config.
+   */
+  setBeaconNotificationConfig(
+    config: BeaconNotificationSettings | BeaconNotificationConfig,
+  ): void;
+
+  /**
+   * Persist only CarPlay / Android Auto notification settings without replacing beacon settings.
+   * Passing a plain CarPlayNotificationConfig is treated as the CarPlay event config.
+   */
+  setCarPlayNotificationConfig(
+    config: CarPlayNotificationSettings | CarPlayNotificationConfig,
+  ): void;
 
   /**
    * Start background region monitoring for all paired beacons.
@@ -221,7 +239,11 @@ export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvent
    * Return the current API forwarding configuration.
    * Each field is `null` if not set.
    */
-  getApiEndpoint(): { url: string | null; apiKey: string | null; id: string | null };
+  getApiEndpoint(): {
+    url: string | null;
+    apiKey: string | null;
+    id: string | null;
+  };
 
   /**
    * Start observing CarPlay (iOS) / Android Auto (Android) connection state.

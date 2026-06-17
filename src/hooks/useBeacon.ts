@@ -4,9 +4,13 @@ import ExpoBeacon from "../ExpoBeaconModule.js";
 import type {
   BeaconDistanceEvent,
   BeaconErrorEvent,
+  BeaconNotificationConfig,
+  BeaconNotificationSettings,
   BeaconRegionEvent,
   BeaconScanResult,
   BeaconTimeoutEvent,
+  CarPlayNotificationConfig,
+  CarPlayNotificationSettings,
   EddystoneDistanceEvent,
   EddystoneRegionEvent,
   EddystoneScanResult,
@@ -135,6 +139,14 @@ export interface UseBeaconResult {
 
   /** Persist notification configuration applied to subsequent monitoring sessions. */
   setNotificationConfig: (config: NotificationConfig) => void;
+  /** Persist only beacon notification settings. */
+  setBeaconNotificationConfig: (
+    config: BeaconNotificationSettings | BeaconNotificationConfig,
+  ) => void;
+  /** Persist only CarPlay / Android Auto notification settings. */
+  setCarPlayNotificationConfig: (
+    config: CarPlayNotificationSettings | CarPlayNotificationConfig,
+  ) => void;
 
   /** Enable SQLite event logging (updates `isEventLoggingEnabled`). */
   enableEventLogging: () => void;
@@ -359,7 +371,14 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
 
   const pairBeacon = useCallback<UseBeaconResult["pairBeacon"]>(
     (identifier, uuid, major, minor, name, timeoutSeconds) => {
-      ExpoBeacon.pairBeacon(identifier, uuid, major, minor, name, timeoutSeconds);
+      ExpoBeacon.pairBeacon(
+        identifier,
+        uuid,
+        major,
+        minor,
+        name,
+        timeoutSeconds,
+      );
       refreshPaired();
     },
     [refreshPaired],
@@ -373,7 +392,13 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
   );
   const pairEddystone = useCallback<UseBeaconResult["pairEddystone"]>(
     (identifier, namespace, instance, name, timeoutSeconds) => {
-      ExpoBeacon.pairEddystone(identifier, namespace, instance, name, timeoutSeconds);
+      ExpoBeacon.pairEddystone(
+        identifier,
+        namespace,
+        instance,
+        name,
+        timeoutSeconds,
+      );
       refreshPaired();
     },
     [refreshPaired],
@@ -431,6 +456,16 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
 
   const setNotificationConfig = useCallback(
     (config: NotificationConfig) => ExpoBeacon.setNotificationConfig(config),
+    [],
+  );
+  const setBeaconNotificationConfig = useCallback(
+    (config: BeaconNotificationSettings | BeaconNotificationConfig) =>
+      ExpoBeacon.setBeaconNotificationConfig(config),
+    [],
+  );
+  const setCarPlayNotificationConfig = useCallback(
+    (config: CarPlayNotificationSettings | CarPlayNotificationConfig) =>
+      ExpoBeacon.setCarPlayNotificationConfig(config),
     [],
   );
 
@@ -497,6 +532,8 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
     getMonitoredDeviceState,
     getMonitoredDeviceStates,
     setNotificationConfig,
+    setBeaconNotificationConfig,
+    setCarPlayNotificationConfig,
     enableEventLogging,
     disableEventLogging,
     getEventLogs,

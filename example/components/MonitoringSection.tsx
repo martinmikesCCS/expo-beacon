@@ -26,27 +26,31 @@ export function MonitoringSection({
       const dist =
         maxDistance.trim() !== "" ? parseFloat(maxDistance) : undefined;
       const exitDist =
-        exitDistanceInput.trim() !== "" ? parseFloat(exitDistanceInput) : undefined;
+        exitDistanceInput.trim() !== ""
+          ? parseFloat(exitDistanceInput)
+          : undefined;
 
       // Use the full MonitoringOptions object as documented in the README
       await ExpoBeacon.startMonitoring({
         maxDistance: dist,
         exitDistance: exitDist,
         notifications: {
-          beaconEvents: {
-            enabled: notificationsEnabled,
-            enterTitle,
-            exitTitle,
-            body: "{identifier} {event}ed",
-          },
-          foregroundService: {
-            title: "expo-beacon example",
-            text: "Monitoring for nearby beacons",
-          },
-          channel: {
-            name: "Beacon Alerts",
-            description: "Beacon enter/exit notifications",
-            importance: "default",
+          beacons: {
+            events: {
+              enabled: notificationsEnabled,
+              enterTitle,
+              exitTitle,
+              body: "{identifier} {event}ed",
+            },
+            foregroundService: {
+              title: "expo-beacon example",
+              text: "Monitoring for nearby beacons",
+            },
+            channel: {
+              name: "Beacon Alerts",
+              description: "Beacon enter/exit notifications",
+              importance: "default",
+            },
           },
         },
       });
@@ -54,8 +58,10 @@ export function MonitoringSection({
       setIsMonitoring(true);
       addLog(
         `Monitoring started ✓` +
-          (dist !== undefined ? ` (enter ≤${dist}m` +
-            (exitDist !== undefined ? `, exit >${exitDist}m)` : `)`) : "") +
+          (dist !== undefined
+            ? ` (enter ≤${dist}m` +
+              (exitDist !== undefined ? `, exit >${exitDist}m)` : `)`)
+            : "") +
           (notificationsEnabled ? "" : " (notifications off)"),
       );
     } catch (e: any) {
@@ -76,15 +82,15 @@ export function MonitoringSection({
   // ── Notification Config (persistent) ──
 
   const handleApplyNotificationConfig = () => {
-    ExpoBeacon.setNotificationConfig({
-      beaconEvents: {
+    ExpoBeacon.setBeaconNotificationConfig({
+      events: {
         enabled: notificationsEnabled,
         enterTitle,
         exitTitle,
         body: "{identifier} {event}ed",
       },
     });
-    addLog("Notification config updated ✓");
+    addLog("Beacon notification config updated ✓");
   };
 
   return (

@@ -4,7 +4,7 @@ import UserNotifications
 extension ExpoBeaconModule {
     func postBeaconNotification(identifier: String, eventType: String) {
         let cfg = loadNotificationConfig()
-        let eventsCfg = cfg["beaconEvents"] as? [String: Any]
+        let eventsCfg = notificationSection(cfg, sectionKey: "beacons", childKey: "events", legacyKey: "beaconEvents")
 
         // Respect the enabled flag (defaults to true)
         if let enabled = eventsCfg?["enabled"] as? Bool, !enabled { return }
@@ -53,7 +53,7 @@ extension ExpoBeaconModule {
     /// substituted with an empty string.
     func postCarPlayNotification(eventType: String, transport: String?) {
         let cfg = loadNotificationConfig()
-        let eventsCfg = cfg["carPlayEvents"] as? [String: Any]
+        let eventsCfg = notificationSection(cfg, sectionKey: "carPlay", childKey: "events", legacyKey: "carPlayEvents")
 
         // Respect the enabled flag (defaults to true)
         if let enabled = eventsCfg?["enabled"] as? Bool, !enabled { return }
@@ -97,5 +97,41 @@ extension ExpoBeaconModule {
             return [:]
         }
         return dict
+    }
+
+    func saveNotificationConfig(_ config: [String: Any]) {
+        if let data = try? JSONSerialization.data(withJSONObject: config),
+           let json = String(data: data, encoding: .utf8) {
+            self.defaults.set(json, forKey: NOTIFICATION_CONFIG_KEY)
+        }
+    }
+
+    func updateNotificationSection(_ sectionKey: String, config: [String: Any], nestedKeys: Set<String>) {
+        var current = loadNotificationConfig()
+        current[sectionKey] = normalizeNotificationSection(config, nestedKeys: nestedKeys)
+        saveNotificationConfig(current)
+    }
+
+    func mergeNotificationConfig(_ config: [String: Any]) {
+        var current = loadNotificationConfig()
+        for (key, value) in config {
+            current[key] = value
+        }
+        saveNotificationConfig(current)
+    }
+
+    func notificationSection(_ config: [String: Any], sectionKey: String, childKey: String, legacyKey: String) -> [String: Any]? {
+        if let section = config[sectionKey] as? [String: Any],
+           let child = section[childKey] as? [String: Any] {
+            return child
+        }
+        return config[legacyKey] as? [String: Any]
+    }
+
+    private func normalizeNotificationSection(_ config: [String: Any], nestedKeys: Set<String>) -> [String: Any] {
+        if config.keys.contains(where: { nestedKeys.contains($0) }) {
+            return config
+        }
+        return ["events": config]
     }
 }

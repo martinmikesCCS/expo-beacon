@@ -9,10 +9,7 @@ export type {
   UseBeaconResult,
   InRangeBeacon,
 } from "./hooks/useBeacon";
-export type {
-  UseCarPlayOptions,
-  UseCarPlayResult,
-} from "./hooks/useCarPlay";
+export type { UseCarPlayOptions, UseCarPlayResult } from "./hooks/useCarPlay";
 
 // All public types
 export type {
@@ -24,11 +21,13 @@ export type {
   BeaconErrorEvent,
   ExpoBeaconModuleEvents,
   NotificationConfig,
+  BeaconNotificationSettings,
   MonitoringOptions,
   MonitoringConfig,
   MonitoredDeviceState,
   BeaconNotificationConfig,
   CarPlayNotificationConfig,
+  CarPlayNotificationSettings,
   CarPlayChannelConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,

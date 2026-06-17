@@ -332,10 +332,23 @@ public class ExpoBeaconModule: Module {
         // MARK: - Notification Config
 
         Function("setNotificationConfig") { (config: [String: Any]) in
-            if let data = try? JSONSerialization.data(withJSONObject: config),
-               let json = String(data: data, encoding: .utf8) {
-                self.defaults.set(json, forKey: NOTIFICATION_CONFIG_KEY)
-            }
+            self.saveNotificationConfig(config)
+        }
+
+        Function("setBeaconNotificationConfig") { (config: [String: Any]) in
+            self.updateNotificationSection(
+                "beacons",
+                config: config,
+                nestedKeys: ["events", "foregroundService", "channel"]
+            )
+        }
+
+        Function("setCarPlayNotificationConfig") { (config: [String: Any]) in
+            self.updateNotificationSection(
+                "carPlay",
+                config: config,
+                nestedKeys: ["events", "foregroundService", "channel"]
+            )
         }
 
         // MARK: - Monitoring

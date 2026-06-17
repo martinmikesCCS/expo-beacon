@@ -11,7 +11,7 @@ extension ExpoBeaconModule {
         var minRssi: Int? = nil
         var exitTimeoutSecs: Double? = nil
         var level = "all"
-        var notificationsJson: String? = nil
+        var notificationsConfig: [String: Any]? = nil
         if let dist: Double = options?.get() {
             maxDistance = dist
         } else if let map: [String: Any] = options?.get() {
@@ -22,10 +22,8 @@ extension ExpoBeaconModule {
             if let lvl = map["level"] as? String, lvl == "events" || lvl == "all" {
                 level = lvl
             }
-            if let notifications = map["notifications"] as? [String: Any],
-               let data = try? JSONSerialization.data(withJSONObject: notifications),
-               let json = String(data: data, encoding: .utf8) {
-                notificationsJson = json
+            if let notifications = map["notifications"] as? [String: Any] {
+                notificationsConfig = notifications
             }
         }
         if let dist = maxDistance, (!dist.isFinite || dist <= 0) {
@@ -52,8 +50,8 @@ extension ExpoBeaconModule {
         // and options map) reset the same keys so they leave consistent state.
         self.eventLevel = level
         defaults.set(level, forKey: EVENT_LEVEL_KEY)
-        if let json = notificationsJson {
-            defaults.set(json, forKey: NOTIFICATION_CONFIG_KEY)
+        if let notificationsConfig {
+            mergeNotificationConfig(notificationsConfig)
         }
         if let dist = maxDistance {
             defaults.set(dist, forKey: MAX_DISTANCE_KEY)

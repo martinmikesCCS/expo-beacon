@@ -5,6 +5,10 @@ import type {
   PairedBeacon,
   PairedEddystone,
   NotificationConfig,
+  BeaconNotificationConfig,
+  BeaconNotificationSettings,
+  CarPlayNotificationConfig,
+  CarPlayNotificationSettings,
   MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
@@ -49,24 +53,39 @@ const stub: ExpoBeaconModule = {
   stopContinuousScan: (): void => notSupported(),
   cancelScan: (): void => notSupported(),
   setNotificationConfig: (_config: NotificationConfig): void => notSupported(),
+  setBeaconNotificationConfig: (
+    _config: BeaconNotificationSettings | BeaconNotificationConfig,
+  ): void => notSupported(),
+  setCarPlayNotificationConfig: (
+    _config: CarPlayNotificationSettings | CarPlayNotificationConfig,
+  ): void => notSupported(),
   requestPermissionsAsync: (): Promise<boolean> => notSupportedAsync(),
   enableEventLogging: (): void => notSupported(),
   disableEventLogging: (): void => notSupported(),
   isEventLoggingEnabled: (): boolean => false,
-  getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] => notSupported(),
+  getEventLogs: (_options?: EventLogQueryOptions): EventLogEntry[] =>
+    notSupported(),
   clearEventLogs: (): void => notSupported(),
   destroyEventLogs: (): void => notSupported(),
   setApiEndpoint: (_url: string, _apiKey?: string, _id?: string): void => {},
   getMonitoringConfig: () => notSupported(),
-  getMonitoredDeviceState: (_identifier: string): MonitoredDeviceState | null => notSupported(),
+  getMonitoredDeviceState: (_identifier: string): MonitoredDeviceState | null =>
+    notSupported(),
   getMonitoredDeviceStates: (): MonitoredDeviceState[] => notSupported(),
-  getApiEndpoint: (): { url: string | null; apiKey: string | null; id: string | null } => notSupported(),
+  getApiEndpoint: (): {
+    url: string | null;
+    apiKey: string | null;
+    id: string | null;
+  } => notSupported(),
   isBatteryOptimizationExempt: (): boolean => true,
-  requestBatteryOptimizationExemption: (): Promise<boolean> => Promise.resolve(true),
+  requestBatteryOptimizationExemption: (): Promise<boolean> =>
+    Promise.resolve(true),
   startCarPlayMonitoring: (): Promise<void> => Promise.resolve(),
   stopCarPlayMonitoring: (): Promise<void> => Promise.resolve(),
   isCarPlayMonitoringEnabled: (): boolean => false,
-  getCarPlayConnectionStatus: (): CarPlayConnectionStatus => ({ connected: false }),
+  getCarPlayConnectionStatus: (): CarPlayConnectionStatus => ({
+    connected: false,
+  }),
   getCarPlayDiagnostics: (): CarPlayDiagnostics => ({
     isCarAppMetadataPresent: false,
     isCarProviderQueryable: false,
@@ -77,7 +96,10 @@ const stub: ExpoBeaconModule = {
   addListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => ({
     remove: () => {},
   }),
-  removeListener: (_eventName: keyof ExpoBeaconModuleEvents, _listener: any) => {},
+  removeListener: (
+    _eventName: keyof ExpoBeaconModuleEvents,
+    _listener: any,
+  ) => {},
   removeAllListeners: (_eventName: keyof ExpoBeaconModuleEvents) => {},
   emit: (_eventName: keyof ExpoBeaconModuleEvents, ..._args: unknown[]) => {},
   listenerCount: (_eventName: keyof ExpoBeaconModuleEvents): number => 0,

@@ -145,17 +145,41 @@ export type CarPlayChannelConfig = {
   importance?: "low" | "default" | "high";
 };
 
+/** Notification settings for beacon monitoring. */
+export type BeaconNotificationSettings = {
+  /** Settings for beacon enter/exit/timeout event notifications. */
+  events?: BeaconNotificationConfig;
+  /** Settings for the persistent Android foreground service notification. */
+  foregroundService?: ForegroundServiceConfig;
+  /** Settings for the Android notification channel used by beacon notifications. */
+  channel?: NotificationChannelConfig;
+};
+
+/** Notification settings for CarPlay / Android Auto monitoring. */
+export type CarPlayNotificationSettings = {
+  /** Settings for CarPlay / Android Auto connect/disconnect notifications. */
+  events?: CarPlayNotificationConfig;
+  /** Settings for the persistent Android foreground service notification in CarPlay-only mode. */
+  foregroundService?: ForegroundServiceConfig;
+  /** Settings for the Android notification channel used by CarPlay notifications. */
+  channel?: CarPlayChannelConfig;
+};
+
 /** Combined notification configuration for all notification types. */
 export type NotificationConfig = {
-  /** Settings for beacon enter/exit event notifications. */
+  /** Settings for beacon monitoring notifications. */
+  beacons?: BeaconNotificationSettings;
+  /** Settings for CarPlay / Android Auto notifications. */
+  carPlay?: CarPlayNotificationSettings;
+  /** @deprecated Use `beacons.events` instead. */
   beaconEvents?: BeaconNotificationConfig;
-  /** Settings for CarPlay / Android Auto connect/disconnect notifications. */
+  /** @deprecated Use `carPlay.events` instead. */
   carPlayEvents?: CarPlayNotificationConfig;
-  /** Settings for the persistent foreground service notification (Android only). */
+  /** @deprecated Use `beacons.foregroundService` instead. */
   foregroundService?: ForegroundServiceConfig;
-  /** Settings for the Android notification channel (Android only). */
+  /** @deprecated Use `beacons.channel` instead. */
   channel?: NotificationChannelConfig;
-  /** Settings for the Android notification channel used for CarPlay events (Android only). */
+  /** @deprecated Use `carPlay.channel` instead. */
   carPlayChannel?: CarPlayChannelConfig;
 };
 
@@ -166,7 +190,7 @@ export type MonitoringConfig = {
   maxDistance?: number;
   exitDistance?: number;
   minRssi?: number;
-  level?: 'all' | 'events';
+  level?: "all" | "events";
   /** Seconds after last beacon sighting before an exit event fires. Default: 300. */
   exitTimeoutSeconds?: number;
   notifications?: NotificationConfig;
@@ -227,7 +251,7 @@ export type MonitoringOptions = {
    * - `'all'` (default): distance + enter + exit + timeout events.
    * - `'events'`: enter + exit + timeout only (no distance events).
    */
-  level?: 'all' | 'events';
+  level?: "all" | "events";
   /**
    * Seconds after last beacon sighting before an exit event fires when the beacon
    * disappears without moving outside the exit distance threshold.
@@ -315,10 +339,10 @@ export type EddystoneTimeoutEvent = {
 
 /** Transport reported with CarPlay / Android Auto connection events. */
 export type CarPlayTransport =
-  | "wired"      // iOS CarPlay over USB / Lightning
-  | "wireless"   // iOS CarPlay over Bluetooth + Wi-Fi
+  | "wired" // iOS CarPlay over USB / Lightning
+  | "wireless" // iOS CarPlay over Bluetooth + Wi-Fi
   | "projection" // Android Auto projection (phone projecting to head unit)
-  | "native"     // Android Automotive OS (running on the head unit)
+  | "native" // Android Automotive OS (running on the head unit)
   | "unknown";
 
 /** Payload fired when the device connects to a CarPlay or Android Auto session. */

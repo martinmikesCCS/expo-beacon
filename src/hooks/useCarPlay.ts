@@ -5,6 +5,8 @@ import type {
   CarPlayConnectedEvent,
   CarPlayDiagnostics,
   CarPlayDisconnectedEvent,
+  CarPlayNotificationConfig,
+  CarPlayNotificationSettings,
   CarPlayTransport,
 } from "../ExpoBeacon.types";
 
@@ -38,6 +40,10 @@ export interface UseCarPlayResult {
   refresh: () => void;
   /** Fetch CarPlay / Android Auto detection diagnostics (troubleshooting). */
   getDiagnostics: () => CarPlayDiagnostics;
+  /** Persist only CarPlay / Android Auto notification settings. */
+  setCarPlayNotificationConfig: (
+    config: CarPlayNotificationSettings | CarPlayNotificationConfig,
+  ) => void;
 }
 
 /**
@@ -93,6 +99,12 @@ export function useCarPlay(options: UseCarPlayOptions = {}): UseCarPlayResult {
     [],
   );
 
+  const setCarPlayNotificationConfig = useCallback(
+    (config: CarPlayNotificationSettings | CarPlayNotificationConfig) =>
+      ExpoBeacon.setCarPlayNotificationConfig(config),
+    [],
+  );
+
   // Initialize from native state and subscribe to connection events (once).
   useEffect(() => {
     try {
@@ -142,5 +154,6 @@ export function useCarPlay(options: UseCarPlayOptions = {}): UseCarPlayResult {
     stopMonitoring,
     refresh,
     getDiagnostics,
+    setCarPlayNotificationConfig,
   };
 }

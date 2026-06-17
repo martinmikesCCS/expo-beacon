@@ -48,18 +48,24 @@ const formatCarPlayEventDateTime = (
 export default function App() {
   // Paired beacons
   const [pairedBeacons, setPairedBeacons] = useState<PairedBeacon[]>([]);
-  const [pairedEddystones, setPairedEddystones] = useState<PairedEddystone[]>([]);
+  const [pairedEddystones, setPairedEddystones] = useState<PairedEddystone[]>(
+    [],
+  );
 
   // Event log
   const [eventLog, setEventLog] = useState<EventLogEntry[]>([]);
 
   // Event logging (SQLite)
   const [isLoggingEnabled, setIsLoggingEnabled] = useState(false);
-  const [nativeEventLogs, setNativeEventLogs] = useState<NativeEventLogEntry[]>([]);
+  const [nativeEventLogs, setNativeEventLogs] = useState<NativeEventLogEntry[]>(
+    [],
+  );
 
   // CarPlay / Android Auto monitoring
   const [isCarPlayMonitoring, setIsCarPlayMonitoring] = useState(false);
-  const [carPlayState, setCarPlayState] = useState<"connected" | "disconnected" | "unknown">("unknown");
+  const [carPlayState, setCarPlayState] = useState<
+    "connected" | "disconnected" | "unknown"
+  >("unknown");
   const [carPlayTransport, setCarPlayTransport] = useState<string>("");
 
   // CarPlay UAT debug panel
@@ -132,10 +138,7 @@ export default function App() {
     const eddyExitSub = ExpoBeacon.addListener(
       "onEddystoneExit",
       (event: EddystoneRegionEvent) => {
-        addLog(
-          `EDDY EXITED: ${event.identifier} (${event.namespace})`,
-          "exit",
-        );
+        addLog(`EDDY EXITED: ${event.identifier} (${event.namespace})`, "exit");
       },
     );
     const eddyDistSub = ExpoBeacon.addListener(
@@ -262,12 +265,7 @@ export default function App() {
 
   const handlePair = (beacon: BeaconScanResult) => {
     const identifier = `beacon-${beacon.uuid.slice(0, 8)}-${beacon.major}-${beacon.minor}`;
-    ExpoBeacon.pairBeacon(
-      identifier,
-      beacon.uuid,
-      beacon.major,
-      beacon.minor,
-    );
+    ExpoBeacon.pairBeacon(identifier, beacon.uuid, beacon.major, beacon.minor);
     refreshPairedBeacons();
     addLog(`Paired: ${identifier}`);
   };
@@ -282,7 +280,13 @@ export default function App() {
     if (beacon.frameType !== "uid" || !beacon.namespace || !beacon.instance)
       return;
     const identifier = `eddy-${beacon.namespace.slice(0, 8)}-${beacon.instance}`;
-    ExpoBeacon.pairEddystone(identifier, beacon.namespace, beacon.instance, beacon.name ?? identifier, 30);
+    ExpoBeacon.pairEddystone(
+      identifier,
+      beacon.namespace,
+      beacon.instance,
+      beacon.name ?? identifier,
+      30,
+    );
     refreshPairedBeacons();
     addLog(`Paired Eddystone: ${identifier}`);
   };
@@ -315,6 +319,26 @@ export default function App() {
     } catch (e: any) {
       addLog(`CarPlay stop failed: ${e.message}`);
     }
+  };
+
+  const handleConfigureCarPlayNotifications = () => {
+    ExpoBeacon.setCarPlayNotificationConfig({
+      events: {
+        connectedTitle: "Vehicle connected",
+        disconnectedTitle: "Vehicle disconnected",
+        body: "CarPlay {event} {transport}",
+      },
+      foregroundService: {
+        title: "expo-beacon example",
+        text: "Monitoring CarPlay / Android Auto",
+      },
+      channel: {
+        name: "CarPlay Alerts",
+        description: "CarPlay and Android Auto connection notifications",
+        importance: "default",
+      },
+    });
+    addLog("CarPlay notification config updated ✓");
   };
 
   // ── Event Logging (SQLite) ──
@@ -370,6 +394,7 @@ export default function App() {
           carPlayTransport={carPlayTransport}
           onStart={handleStartCarPlay}
           onStop={handleStopCarPlay}
+          onConfigureNotifications={handleConfigureCarPlayNotifications}
         />
 
         <ScanSection

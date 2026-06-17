@@ -271,6 +271,8 @@ function BeaconScreen() {
 | `getMonitoringConfig()` | Read the current monitoring config + active-state snapshot. |
 | `getMonitoredDeviceState()` / `getMonitoredDeviceStates()` | Native state snapshot for one / all paired devices. |
 | `setNotificationConfig()` | Persist notification configuration for monitoring sessions. |
+| `setBeaconNotificationConfig()` | Persist only beacon notification settings. |
+| `setCarPlayNotificationConfig()` | Persist only CarPlay / Android Auto notification settings. |
 | `enableEventLogging()` / `disableEventLogging()` | Toggle SQLite logging (updates `isEventLoggingEnabled`). |
 | `getEventLogs()` / `clearEventLogs()` / `destroyEventLogs()` | Read / clear / drop the persisted event log. |
 | `setApiEndpoint()` / `getApiEndpoint()` | Configure / read the native event-forwarding endpoint. |
@@ -660,28 +662,57 @@ await ExpoBeacon.startMonitoring();
 
 ```ts
 ExpoBeacon.setNotificationConfig({
-  // Enter/exit alert notifications (both platforms)
-  beaconEvents: {
-    enabled: true,                        // Set false to suppress notifications entirely
-    enterTitle: "Beacon nearby",
-    exitTitle: "Beacon out of range",
-    body: "{identifier} {event}ed",       // Placeholders: {identifier}, {event}
-    sound: true,                          // iOS only
-    icon: "ic_beacon_notification",       // Android only — drawable resource name
+  beacons: {
+    // Enter/exit/timeout alert notifications (both platforms)
+    events: {
+      enabled: true,                      // Set false to suppress beacon alerts
+      enterTitle: "Beacon nearby",
+      exitTitle: "Beacon out of range",
+      timeoutTitle: "Beacon timed out",
+      body: "{identifier} {event}ed",     // Placeholders: {identifier}, {event}
+      sound: true,                        // iOS only
+      icon: "ic_beacon_notification",     // Android only — drawable resource name
+    },
+
+    // Persistent status-bar notification for beacon monitoring (Android only)
+    foregroundService: {
+      title: "My App — Beacon monitoring",
+      text: "Watching for nearby beacons",
+      icon: "ic_service",
+    },
+
+    // Android notification channel for beacon notifications
+    channel: {
+      name: "Proximity Alerts",
+      description: "Alerts when beacons enter or leave range",
+      importance: "default",              // "low" | "default" | "high"
+    },
   },
 
-  // Persistent status-bar notification (Android only)
-  foregroundService: {
-    title: "My App — Monitoring",
-    text: "Watching for nearby beacons",
-    icon: "ic_service",
-  },
+  carPlay: {
+    // Connect/disconnect notifications (both platforms)
+    events: {
+      enabled: true,                      // Set false to suppress CarPlay alerts
+      connectedTitle: "CarPlay connected",
+      disconnectedTitle: "CarPlay disconnected",
+      body: "CarPlay {event} {transport}", // Placeholders: {event}, {transport}
+      sound: true,                        // iOS only
+      icon: "ic_carplay_notification",    // Android only — drawable resource name
+    },
 
-  // Android notification channel
-  channel: {
-    name: "Proximity Alerts",
-    description: "Alerts when beacons enter or leave range",
-    importance: "default",                // "low" | "default" | "high"
+    // Persistent status-bar notification in CarPlay-only mode (Android only)
+    foregroundService: {
+      title: "My App — Vehicle monitoring",
+      text: "Monitoring CarPlay / Android Auto",
+      icon: "ic_service",
+    },
+
+    // Android notification channel for CarPlay notifications
+    channel: {
+      name: "CarPlay Alerts",
+      description: "CarPlay and Android Auto connection notifications",
+      importance: "default",
+    },
   },
 });
 ```
@@ -1323,9 +1354,27 @@ setNotificationConfig(config: NotificationConfig): void
 
 Persists notification configuration applied to **all subsequent monitoring sessions**. Survives app restarts.
 
-For one-off overrides, pass `notifications` inside `startMonitoring(options)` instead.
+For one-off overrides, pass `notifications` inside `startMonitoring(options)` instead. Monitoring-time notification overrides are merged into the persisted notification config, so omitted beacon or CarPlay sections are preserved.
+
+Use the top-level `beacons` and `carPlay` sections to configure those notification streams independently. Legacy keys (`beaconEvents`, `carPlayEvents`, `foregroundService`, `channel`, `carPlayChannel`) are still accepted for existing apps.
 
 See [`NotificationConfig`](#notificationconfig) for the full shape.
+
+### `setBeaconNotificationConfig(config)`
+
+```ts
+setBeaconNotificationConfig(config: BeaconNotificationSettings | BeaconNotificationConfig): void
+```
+
+Persists only beacon notification settings without replacing CarPlay settings. Passing a plain `BeaconNotificationConfig` is treated as `beacons.events`.
+
+### `setCarPlayNotificationConfig(config)`
+
+```ts
+setCarPlayNotificationConfig(config: CarPlayNotificationSettings | CarPlayNotificationConfig): void
+```
+
+Persists only CarPlay / Android Auto notification settings without replacing beacon settings. Passing a plain `CarPlayNotificationConfig` is treated as `carPlay.events`.
 
 ---
 
@@ -1591,9 +1640,13 @@ import type {
   ExpoBeaconModuleEvents,
   MonitoringOptions,
   NotificationConfig,
+  BeaconNotificationSettings,
   BeaconNotificationConfig,
+  CarPlayNotificationSettings,
+  CarPlayNotificationConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
+  CarPlayChannelConfig,
   EventLogQueryOptions,
   EventLogEntry,
 } from "expo-beacon";
@@ -1774,9 +1827,35 @@ Top-level notification configuration.
 
 ```ts
 type NotificationConfig = {
-  beaconEvents?: BeaconNotificationConfig;     // Enter/exit alerts
-  foregroundService?: ForegroundServiceConfig;  // Android only — persistent status bar
-  channel?: NotificationChannelConfig;          // Android only — channel settings
+  beacons?: BeaconNotificationSettings;
+  carPlay?: CarPlayNotificationSettings;
+
+  // Legacy aliases, still accepted:
+  beaconEvents?: BeaconNotificationConfig;
+  carPlayEvents?: CarPlayNotificationConfig;
+  foregroundService?: ForegroundServiceConfig;
+  channel?: NotificationChannelConfig;
+  carPlayChannel?: CarPlayChannelConfig;
+};
+```
+
+### `BeaconNotificationSettings`
+
+```ts
+type BeaconNotificationSettings = {
+  events?: BeaconNotificationConfig;
+  foregroundService?: ForegroundServiceConfig; // Android only
+  channel?: NotificationChannelConfig;         // Android only
+};
+```
+
+### `CarPlayNotificationSettings`
+
+```ts
+type CarPlayNotificationSettings = {
+  events?: CarPlayNotificationConfig;
+  foregroundService?: ForegroundServiceConfig; // Android only, CarPlay-only mode
+  channel?: CarPlayChannelConfig;              // Android only
 };
 ```
 
@@ -1812,6 +1891,30 @@ type NotificationChannelConfig = {
   name?: string;                           // Default: "Beacon Monitoring"
   description?: string;                    // Default: "Used for background iBeacon region monitoring"
   importance?: "low" | "default" | "high"; // Default: "low"
+};
+```
+
+### `CarPlayNotificationConfig`
+
+```ts
+type CarPlayNotificationConfig = {
+  enabled?: boolean;          // Default: true. Set false to suppress.
+  connectedTitle?: string;    // Default: "CarPlay Connected"
+  disconnectedTitle?: string; // Default: "CarPlay Disconnected"
+  body?: string;              // Default: "CarPlay session {event}"
+                              // Supports {event} and {transport} placeholders.
+  sound?: boolean;            // iOS only. Default: true
+  icon?: string;              // Android only. Drawable resource name.
+};
+```
+
+### `CarPlayChannelConfig`
+
+```ts
+type CarPlayChannelConfig = {
+  name?: string;                            // Default: "CarPlay / Android Auto"
+  description?: string;                     // Default: "CarPlay and Android Auto connect/disconnect notifications"
+  importance?: "low" | "default" | "high"; // Default: "default"
 };
 ```
 
@@ -2101,7 +2204,7 @@ override fun onCreate() {
 
 ## Notifications
 
-A local notification is posted automatically for every beacon enter/exit event (both iBeacon and Eddystone) during monitoring.
+Local notifications are posted automatically for beacon enter/exit/timeout events and CarPlay / Android Auto connect/disconnect events. Beacon notifications and CarPlay notifications have separate configuration sections and separate Android channels.
 
 ### Default Values
 
@@ -2110,16 +2213,23 @@ A local notification is posted automatically for every beacon enter/exit event (
 | Enter title | `"Beacon Entered"` |
 | Exit title | `"Beacon Exited"` |
 | Body | `"{identifier} region {event}ed"` |
+| CarPlay connected title | `"CarPlay Connected"` |
+| CarPlay disconnected title | `"CarPlay Disconnected"` |
+| CarPlay body | `"CarPlay session {event}"` |
 | Sound (iOS) | `true` |
 | Icon (Android) | System `ic_dialog_info` |
 | Foreground service title | `"Beacon Monitoring Active"` |
 | Foreground service text | `"Monitoring for iBeacons in the background"` |
+| CarPlay-only foreground title | `"Connected device monitoring active"` |
+| CarPlay-only foreground text | `"Monitoring connected vehicle (CarPlay/Android Auto)"` |
 | Channel name (Android) | `"Beacon Monitoring"` |
 | Channel importance (Android) | `"low"` |
+| CarPlay channel name (Android) | `"CarPlay / Android Auto"` |
+| CarPlay channel importance (Android) | `"default"` |
 
-### Android Channel
+### Android Channels
 
-Both the foreground service and enter/exit alerts share the channel ID `expo_beacon_channel`. The channel is recreated on each `onStartCommand`, so config changes take effect on the next monitoring start.
+Beacon foreground-service and event notifications use the channel ID `expo_beacon_channel`. CarPlay / Android Auto event notifications use `expo_beacon_carplay_channel`; when Android runs in CarPlay-only mode, the foreground-service notification also uses the CarPlay channel and `carPlay.foregroundService` config.
 
 > **Android channel importance note**: Android prevents decreasing channel importance after the first notification. Increasing works; decreasing has no effect until the user clears notification settings or reinstalls the app.
 
