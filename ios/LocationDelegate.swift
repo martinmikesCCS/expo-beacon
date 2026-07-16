@@ -33,18 +33,6 @@ internal final class LocationDelegate: NSObject, CLLocationManagerDelegate {
         module?.handleDidFailRanging(for: beaconConstraint, error: error)
     }
 
-    // Significant Location Change wake — used as a background-wake hook for
-    // CarPlay state reconciliation when the app is suspended.
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        module?.handleBackgroundWakeForCarPlay()
-    }
-
-    // CLVisit wake — fires on arrival/departure from a place. Same purpose
-    // as the SLC wake above; either may fire first depending on the user's
-    // movement pattern.
-    func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
-        module?.handleBackgroundWakeForCarPlay()
-    }
 
     // Response to requestState(for:) — called by iOS after a background-process
     // restart to confirm whether the device is currently inside a monitored

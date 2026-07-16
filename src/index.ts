@@ -3,13 +3,11 @@ export { default } from "./ExpoBeaconModule.js";
 
 // React hooks
 export { useBeacon } from "./hooks/useBeacon.js";
-export { useCarPlay } from "./hooks/useCarPlay.js";
 export type {
   UseBeaconOptions,
   UseBeaconResult,
   InRangeBeacon,
 } from "./hooks/useBeacon";
-export type { UseCarPlayOptions, UseCarPlayResult } from "./hooks/useCarPlay";
 
 // All public types
 export type {
@@ -26,9 +24,6 @@ export type {
   MonitoringConfig,
   MonitoredDeviceState,
   BeaconNotificationConfig,
-  CarPlayNotificationConfig,
-  CarPlayNotificationSettings,
-  CarPlayChannelConfig,
   ForegroundServiceConfig,
   NotificationChannelConfig,
   EddystoneFrameType,
@@ -39,9 +34,4 @@ export type {
   EddystoneTimeoutEvent,
   EventLogQueryOptions,
   EventLogEntry,
-  CarPlayTransport,
-  CarPlayConnectedEvent,
-  CarPlayDisconnectedEvent,
-  CarPlayConnectionStatus,
-  CarPlayDiagnostics,
 } from "./ExpoBeacon.types";

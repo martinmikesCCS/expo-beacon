@@ -17,6 +17,7 @@ internal class BeaconEventLogger(context: Context) :
         private const val DB_NAME = "expo_beacon_events.db"
         private const val DB_VERSION = 1
         private const val TABLE = "events"
+        private const val MAX_STORED_EVENTS = 10000
 
         fun isLoggingEnabled(context: Context): Boolean {
             return context.applicationContext
@@ -65,7 +66,21 @@ internal class BeaconEventLogger(context: Context) :
             put("identifier", identifier)
             put("data", json.toString())
         }
-        writableDatabase.insert(TABLE, null, values)
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.insert(TABLE, null, values)
+            // AUTOINCREMENT ids are monotonic. Keeping only the latest id range
+            // enforces a strict row bound without a full COUNT scan per event.
+            db.delete(
+                TABLE,
+                "id <= (SELECT MAX(id) - ? FROM $TABLE)",
+                arrayOf(MAX_STORED_EVENTS.toString())
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
     }
 
     fun getEvents(limit: Int = 1000, eventType: String? = null, sinceTimestamp: Long? = null): List<Map<String, Any?>> {

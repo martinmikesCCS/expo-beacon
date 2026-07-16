@@ -9,15 +9,21 @@ extension ExpoBeaconModule {
     }
 
     /// Sends an event to JS and logs it to SQLite if logging is enabled.
-    func sendLoggedEvent(_ eventName: String, _ params: [String: Any]) {
+    func sendLoggedEvent(
+        _ eventName: String,
+        _ params: [String: Any],
+        dispatchLifecycle: Bool = true
+    ) {
         if isEventLoggingEnabled() {
             let identifier = params["identifier"] as? String
             getOrCreateEventLogger().logEvent(eventType: eventName, identifier: identifier, data: params)
         }
         // Forward all produced events to remote API
-        apiForwarder.forwardEvent(params)
+        apiForwarder.forwardEvent(params, eventType: eventName)
         // Dispatch enter/exit to registered plugins (e.g. to start/stop BGLocation)
-        dispatchToLifecycleRegistry(eventName: eventName, params: params)
+        if dispatchLifecycle {
+            dispatchToLifecycleRegistry(eventName: eventName, params: params)
+        }
         sendEvent(eventName, params)
     }
 
@@ -71,10 +77,6 @@ extension ExpoBeaconModule {
                 instance: params["instance"] as? String ?? "",
                 distance: distance
             )
-        case "onCarPlayConnected":
-            r.dispatchCarPlayConnect(transport: params["transport"] as? String ?? "unknown")
-        case "onCarPlayDisconnected":
-            r.dispatchCarPlayDisconnect()
         default:
             break
         }

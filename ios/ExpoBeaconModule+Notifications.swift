@@ -46,48 +46,6 @@ extension ExpoBeaconModule {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
-    /// Post a local notification when a CarPlay session connects or disconnects.
-    /// `eventType` is `"connected"` or `"disconnected"`. `transport` is the
-    /// transport string from the connect payload (e.g. "wired", "wireless");
-    /// pass `nil` on disconnect — the `{transport}` body placeholder is then
-    /// substituted with an empty string.
-    func postCarPlayNotification(eventType: String, transport: String?) {
-        let cfg = loadNotificationConfig()
-        let eventsCfg = notificationSection(cfg, sectionKey: "carPlay", childKey: "events", legacyKey: "carPlayEvents")
-
-        // Respect the enabled flag (defaults to true)
-        if let enabled = eventsCfg?["enabled"] as? Bool, !enabled { return }
-
-        let defaultTitle = eventType == "connected" ? "CarPlay Connected" : "CarPlay Disconnected"
-        let title: String
-        switch eventType {
-        case "connected":
-            title = (eventsCfg?["connectedTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
-        default:
-            title = (eventsCfg?["disconnectedTitle"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultTitle
-        }
-
-        let bodyTemplate = (eventsCfg?["body"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            ?? "CarPlay session {event}"
-        let body = bodyTemplate
-            .replacingOccurrences(of: "{event}", with: eventType)
-            .replacingOccurrences(of: "{transport}", with: transport ?? "")
-
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-
-        let playSound = eventsCfg?["sound"] as? Bool ?? true
-        if playSound { content.sound = .default }
-
-        let request = UNNotificationRequest(
-            identifier: "carplay_\(eventType)_\(Date().timeIntervalSince1970)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
-    }
-
     func loadNotificationConfig() -> [String: Any] {
         guard let json = self.defaults.string(forKey: NOTIFICATION_CONFIG_KEY),
               let data = json.data(using: .utf8) else { return [:] }

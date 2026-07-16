@@ -1,6 +1,11 @@
 import Foundation
 import SQLite3
 
+/// SQLite must copy Swift-owned UTF-8 buffers before their temporary bridge
+/// objects go out of scope.
+private let BEACON_SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+private let MAX_STORED_EVENTS = 10_000
+
 /// SQLite-backed event logger for beacon events (iOS).
 /// All access is expected from the main thread (same as ExpoBeaconModule).
 final class BeaconEventLogger {
@@ -62,14 +67,27 @@ final class BeaconEventLogger {
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int64(stmt, 1, timestamp)
-        sqlite3_bind_text(stmt, 2, (eventType as NSString).utf8String, -1, nil)
+        sqlite3_bind_text(stmt, 2, (eventType as NSString).utf8String, -1, BEACON_SQLITE_TRANSIENT)
         if let id = identifier {
-            sqlite3_bind_text(stmt, 3, (id as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, 3, (id as NSString).utf8String, -1, BEACON_SQLITE_TRANSIENT)
         } else {
             sqlite3_bind_null(stmt, 3)
         }
-        sqlite3_bind_text(stmt, 4, (jsonString as NSString).utf8String, -1, nil)
-        sqlite3_step(stmt)
+        sqlite3_bind_text(stmt, 4, (jsonString as NSString).utf8String, -1, BEACON_SQLITE_TRANSIENT)
+        if sqlite3_step(stmt) == SQLITE_DONE {
+            // Distance logging can produce a row every scan cycle. Keep the
+            // database bounded while retaining the newest events; the primary
+            // key makes this pruning query inexpensive.
+            let pruneSql = """
+                DELETE FROM events
+                WHERE id <= (
+                    SELECT id FROM events
+                    ORDER BY id DESC
+                    LIMIT 1 OFFSET \(MAX_STORED_EVENTS)
+                )
+                """
+            sqlite3_exec(db, pruneSql, nil, nil, nil)
+        }
     }
 
     func getEvents(limit: Int = 1000, eventType: String? = nil, sinceTimestamp: Int64? = nil) -> [[String: Any]] {
@@ -88,7 +106,7 @@ final class BeaconEventLogger {
 
         var bindIndex: Int32 = 1
         if let et = eventType {
-            sqlite3_bind_text(stmt, bindIndex, (et as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(stmt, bindIndex, (et as NSString).utf8String, -1, BEACON_SQLITE_TRANSIENT)
             bindIndex += 1
         }
         if let ts = sinceTimestamp {

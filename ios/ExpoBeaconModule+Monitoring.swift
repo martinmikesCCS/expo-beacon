@@ -3,9 +3,155 @@ import ExpoModulesCore
 import os
 
 extension ExpoBeaconModule {
+    // MARK: - Module-owned Core Location regions
+
+    func nativeRegionIdentifier(for identifier: String) -> String {
+        return BEACON_REGION_IDENTIFIER_PREFIX + identifier
+    }
+
+    func publicRegionIdentifier(for region: CLRegion) -> String? {
+        guard region.identifier.hasPrefix(BEACON_REGION_IDENTIFIER_PREFIX) else { return nil }
+        return String(region.identifier.dropFirst(BEACON_REGION_IDENTIFIER_PREFIX.count))
+    }
+
+    func isModuleOwnedRegion(_ region: CLRegion) -> Bool {
+        return region.identifier.hasPrefix(BEACON_REGION_IDENTIFIER_PREFIX)
+    }
+
+    private func storedInt(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        return (value as? NSNumber)?.intValue
+    }
+
+    func makeIdentityConstraint(from entry: [String: Any]) -> CLBeaconIdentityConstraint? {
+        guard let uuidString = entry["uuid"] as? String,
+              let uuid = UUID(uuidString: uuidString),
+              let major = storedInt(entry["major"]),
+              let minor = storedInt(entry["minor"]) else {
+            return nil
+        }
+        return CLBeaconIdentityConstraint(
+            uuid: uuid,
+            major: CLBeaconMajorValue(major),
+            minor: CLBeaconMinorValue(minor)
+        )
+    }
+
+    @discardableResult
+    func addMonitoredIBeacon(from entry: [String: Any], enforceCapacity: Bool = true) -> Bool {
+        guard let identifier = entry["identifier"] as? String,
+              let constraint = makeIdentityConstraint(from: entry) else { return false }
+
+        if enforceCapacity {
+            let hostRegionCount = locationManager.monitoredRegions.filter { !isModuleOwnedRegion($0) }.count
+            let newNativeIdentifier = nativeRegionIdentifier(for: identifier)
+            var ownedIdentifiers = Set(
+                locationManager.monitoredRegions
+                    .filter { isModuleOwnedRegion($0) && $0.identifier != newNativeIdentifier }
+                    .map(\.identifier)
+            )
+            ownedIdentifiers.formUnion(
+                monitoredRegions
+                    .filter { $0.identifier != newNativeIdentifier }
+                    .map(\.identifier)
+            )
+            guard hostRegionCount + ownedIdentifiers.count < 20 else {
+                sendLoggedEvent("onBeaconError", [
+                    "identifier": identifier,
+                    "code": "REGION_LIMIT_EXCEEDED",
+                    "message": "No Core Location region slot is available for this beacon"
+                ])
+                return false
+            }
+        }
+
+        let region = CLBeaconRegion(
+            beaconIdentityConstraint: constraint,
+            identifier: nativeRegionIdentifier(for: identifier)
+        )
+        region.notifyOnEntry = true
+        region.notifyOnExit = true
+        region.notifyEntryStateOnDisplay = true
+        monitoredRegions.append(region)
+        distanceRangingConstraints[identifier] = constraint
+        locationManager.startMonitoring(for: region)
+        locationManager.startRangingBeacons(satisfying: constraint)
+        return true
+    }
+
+    func clearIBeaconRuntimeState(identifier: String) {
+        enteredRegions.remove(identifier)
+        lastSeenTimes.removeValue(forKey: identifier)
+        enterCounters.removeValue(forKey: identifier)
+        exitCounters.removeValue(forKey: identifier)
+        smoothedDistances.removeValue(forKey: identifier)
+        cancelBeaconTimeout(identifier: identifier)
+        cancelBeaconInactivity(identifier: identifier)
+    }
+
+    func removeMonitoredIBeacon(identifier: String) {
+        let nativeIdentifier = nativeRegionIdentifier(for: identifier)
+        let localMatches = monitoredRegions.filter { $0.identifier == nativeIdentifier }
+        for region in localMatches { locationManager.stopMonitoring(for: region) }
+        monitoredRegions.removeAll { $0.identifier == nativeIdentifier }
+
+        // Also remove a restored module-owned region that predates this module
+        // instance and therefore is not present in `monitoredRegions`.
+        for region in locationManager.monitoredRegions where region.identifier == nativeIdentifier {
+            locationManager.stopMonitoring(for: region)
+        }
+        if let constraint = distanceRangingConstraints.removeValue(forKey: identifier) {
+            locationManager.stopRangingBeacons(satisfying: constraint)
+        }
+        clearIBeaconRuntimeState(identifier: identifier)
+    }
+
+    func replaceMonitoredIBeacon(identifier: String, with entry: [String: Any]) {
+        guard defaults.bool(forKey: IS_MONITORING_KEY) else { return }
+        if let newConstraint = makeIdentityConstraint(from: entry),
+           let current = distanceRangingConstraints[identifier],
+           current == newConstraint {
+            // Identity did not change; retain enter state but discard timers that
+            // were configured from the previous pairing metadata.
+            cancelBeaconTimeout(identifier: identifier)
+            cancelBeaconInactivity(identifier: identifier)
+            return
+        }
+        removeMonitoredIBeacon(identifier: identifier)
+        _ = addMonitoredIBeacon(from: entry)
+    }
+
+    func removeMonitoredEddystone(identifier: String) {
+        eddystoneLatestSeen.removeValue(forKey: identifier)
+        eddystoneEnteredRegions.remove(identifier)
+        eddystoneEnterCounters.removeValue(forKey: identifier)
+        eddystoneExitCounters.removeValue(forKey: identifier)
+        eddystoneLastDistanceEmit.removeValue(forKey: identifier)
+        smoothedDistances.removeValue(forKey: identifier)
+        cancelEddystoneTimeout(identifier: identifier)
+        cancelEddystoneInactivity(identifier: identifier)
+    }
+
+    func refreshMonitoredEddystone(identifier: String, identityChanged: Bool) {
+        guard defaults.bool(forKey: IS_MONITORING_KEY) else { return }
+        if identityChanged {
+            removeMonitoredEddystone(identifier: identifier)
+        } else {
+            cancelEddystoneTimeout(identifier: identifier)
+            cancelEddystoneInactivity(identifier: identifier)
+        }
+        if !eddystoneMonitoringActive {
+            startEddystoneMonitoring()
+        }
+    }
+
     // MARK: - startMonitoring (option parsing + validation)
 
     func startMonitoring(options: Either<Double, [String: Any]>?, promise: Promise) {
+        guard !loadPairedBeaconsRaw().isEmpty || !loadPairedEddystonesRaw().isEmpty else {
+            rejectAndEmit(promise, "NO_PAIRED_BEACONS", "Pair at least one iBeacon or Eddystone before starting monitoring")
+            return
+        }
         var maxDistance: Double? = nil
         var exitDistance: Double? = nil
         var minRssi: Int? = nil
@@ -77,7 +223,18 @@ extension ExpoBeaconModule {
             defaults.removeObject(forKey: EXIT_TIMEOUT_SECONDS_KEY)
             exitTimeoutSeconds = DEFAULT_EXIT_TIMEOUT_SECONDS
         }
-        requestLocationPermission { granted in
+        // An Eddystone-only configuration uses CoreBluetooth and should not be
+        // blocked by an unrelated CoreLocation denial.
+        if loadPairedBeaconsRaw().isEmpty {
+            activateMonitoring(promise: promise)
+            return
+        }
+
+        requestLocationPermission { [weak self] granted in
+            guard let self, !self.isModuleDestroyed else {
+                promise.reject("MODULE_DESTROYED", "Beacon module was destroyed while requesting permission")
+                return
+            }
             guard granted else {
                 self.rejectAndEmit(promise, "PERMISSION_DENIED", "Location permission required for monitoring")
                 return
@@ -88,18 +245,19 @@ extension ExpoBeaconModule {
             if self.locationManager.authorizationStatus != .authorizedAlways {
                 self.locationManager.requestAlwaysAuthorization()
             }
-            self.requestNotificationPermission()
-            self.startRegionMonitoring()
-            // Persist the monitoring flag only after permission was granted so a
-            // PERMISSION_DENIED rejection doesn't leave isMonitoring=true behind.
-            self.defaults.set(true, forKey: IS_MONITORING_KEY)
-            // Auto-enable CarPlay monitoring when beacon monitoring starts so
-            // CarPlay events are captured for the same lifetime as beacons.
-            // Users can opt out at any time via stopCarPlayMonitoring().
-            self.defaults.set(true, forKey: CARPLAY_MONITORING_ENABLED_KEY)
-            self.startCarPlayMonitoringInternal()
-            promise.resolve(nil)
+            self.activateMonitoring(promise: promise)
         }
+    }
+
+    private func activateMonitoring(promise: Promise) {
+        guard !isModuleDestroyed else {
+            promise.reject("MODULE_DESTROYED", "Beacon module was destroyed before monitoring could start")
+            return
+        }
+        requestNotificationPermission()
+        startRegionMonitoring()
+        defaults.set(true, forKey: IS_MONITORING_KEY)
+        promise.resolve(nil)
     }
 
     // MARK: - Region monitoring lifecycle
@@ -131,41 +289,16 @@ extension ExpoBeaconModule {
         // CLLocationManager supports a maximum of 20 monitored regions.
         // Log a warning if we exceed this — extra regions will silently fail.
         let maxRegions = 20
-        if beacons.count > maxRegions {
-            print("[ExpoBeacon] Warning: \(beacons.count) paired beacons exceeds the iOS limit of \(maxRegions) monitored regions. Only the first \(maxRegions) will be monitored.")
-            sendLoggedEvent("onBeaconError", ["identifier": "", "code": "REGION_LIMIT_EXCEEDED", "message": "\(beacons.count) paired beacons exceeds the iOS limit of \(maxRegions) monitored regions. Only the first \(maxRegions) will be monitored."])
+        let hostRegionCount = locationManager.monitoredRegions.filter { !isModuleOwnedRegion($0) }.count
+        let availableRegionSlots = max(0, maxRegions - hostRegionCount)
+        if beacons.count > availableRegionSlots {
+            let message = "\(beacons.count) paired beacons exceeds the \(availableRegionSlots) Core Location slots available after accounting for \(hostRegionCount) host-app regions."
+            print("[ExpoBeacon] Warning: \(message)")
+            sendLoggedEvent("onBeaconError", ["identifier": "", "code": "REGION_LIMIT_EXCEEDED", "message": message])
         }
 
-        for b in beacons.prefix(maxRegions) {
-            guard
-                let identifier = b["identifier"] as? String,
-                let uuidString = b["uuid"] as? String,
-                let uuid = UUID(uuidString: uuidString),
-                let major = b["major"] as? Int,
-                let minor = b["minor"] as? Int
-            else { continue }
-
-            let region = CLBeaconRegion(
-                uuid: uuid,
-                major: CLBeaconMajorValue(major),
-                minor: CLBeaconMinorValue(minor),
-                identifier: identifier
-            )
-            region.notifyOnEntry = true
-            region.notifyOnExit = true
-            region.notifyEntryStateOnDisplay = true
-
-            monitoredRegions.append(region)
-            locationManager.startMonitoring(for: region)
-
-            // Always-on ranging for distance events + distance-driven enter/exit
-            let constraint = CLBeaconIdentityConstraint(
-                uuid: uuid,
-                major: CLBeaconMajorValue(major),
-                minor: CLBeaconMinorValue(minor)
-            )
-            distanceRangingConstraints[identifier] = constraint
-            locationManager.startRangingBeacons(satisfying: constraint)
+        for beacon in beacons.prefix(availableRegionSlots) {
+            _ = addMonitoredIBeacon(from: beacon, enforceCapacity: false)
         }
 
         // Start Eddystone-UID monitoring if any paired Eddystones exist
@@ -176,7 +309,11 @@ extension ExpoBeaconModule {
     }
 
     func stopRegionMonitoring() {
-        for region in monitoredRegions {
+        var ownedRegions = Array(locationManager.monitoredRegions.filter { isModuleOwnedRegion($0) })
+        for region in monitoredRegions where !ownedRegions.contains(where: { $0.identifier == region.identifier }) {
+            ownedRegions.append(region)
+        }
+        for region in ownedRegions {
             locationManager.stopMonitoring(for: region)
         }
         monitoredRegions.removeAll()
@@ -315,8 +452,18 @@ extension ExpoBeaconModule {
 
         // 1. One-shot scan mode
         if scanConstraints.contains(where: { $0 == constraint }) {
-            scannedBeacons.append(contentsOf: beacons)
-            return
+            // Keep only the latest sample for each physical beacon so long
+            // scans remain bounded and an initial accuracy=-1 sample does not
+            // hide a later valid reading.
+            for beacon in beacons {
+                if let index = scannedBeacons.firstIndex(where: {
+                    $0.uuid == beacon.uuid && $0.major == beacon.major && $0.minor == beacon.minor
+                }) {
+                    scannedBeacons[index] = beacon
+                } else {
+                    scannedBeacons.append(beacon)
+                }
+            }
         }
 
         // 2. Distance-ranging for monitored beacons
@@ -326,8 +473,12 @@ extension ExpoBeaconModule {
             if let beacon = validBeacon {
                 // Got a valid reading — record sighting time
                 lastSeenTimes[identifier] = Date()
-                // Valid BLE reading — reset inactivity timer.
-                rescheduleBeaconInactivity(identifier: identifier, beacon: beacon)
+                // Cancel an inactivity-armed timeout only while this beacon is
+                // still logically entered. Once a distance exit occurs, merely
+                // seeing it beyond the exit threshold must not cancel timeout.
+                if enteredRegions.contains(identifier) {
+                    cancelBeaconTimeout(identifier: identifier)
+                }
 
                 // Emit distance event every ranging cycle (~1 s) if level allows
                 if self.eventLevel == "all" {
@@ -370,6 +521,12 @@ extension ExpoBeaconModule {
                     break
                 }
 
+                // Inactivity only applies while logically entered. Scheduling
+                // it for far-but-visible beacons would later reset an exit timeout.
+                if enteredRegions.contains(identifier) {
+                    rescheduleBeaconInactivity(identifier: identifier, beacon: beacon)
+                }
+
                 // Note: onBeaconFound for continuous scan is emitted by the
                 // UUID-only constraints in check 3 below, not here, to avoid
                 // duplicate events when both monitoring and continuous scan are active.
@@ -389,7 +546,8 @@ extension ExpoBeaconModule {
                     smoothedDistances.removeValue(forKey: identifier)
 
                     // Look up region info for the exit event payload
-                    let region = monitoredRegions.first { $0.identifier == identifier }
+                    let nativeIdentifier = nativeRegionIdentifier(for: identifier)
+                    let region = monitoredRegions.first { $0.identifier == nativeIdentifier }
                     sendLoggedEvent("onBeaconExit", makeBeaconEventParams(identifier: identifier, region: region, event: "exit"))
                     postBeaconNotification(identifier: identifier, eventType: "exit")
                     // Beacon disappeared — cancel inactivity timer and start the timeout clock.
@@ -418,24 +576,14 @@ extension ExpoBeaconModule {
     }
 
     func handleDidEnterRegion(_ region: CLRegion) {
-        // CLLocationManager region events are one of the few iOS background-wake
-        // signals available to this app. Use this opportunity to reconcile
-        // CarPlay state in case it changed during suspension.
-        if defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
-            CarPlayMonitor.shared.resyncIfNeeded()
-        }
         // Region callbacks are suppressed — all enter/exit logic goes through
         // ranging-based hysteresis in handleDidRange for consistent behaviour
         // with ENTER_HYSTERESIS_COUNT / EXIT_HYSTERESIS_COUNT, regardless of whether maxDistance is set.
     }
 
     func handleDidExitRegion(_ region: CLRegion) {
-        // Reconcile CarPlay state on background wake — see handleDidEnterRegion.
-        if defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
-            CarPlayMonitor.shared.resyncIfNeeded()
-        }
         guard let beaconRegion = region as? CLBeaconRegion else { return }
-        let identifier = beaconRegion.identifier
+        guard let identifier = publicRegionIdentifier(for: beaconRegion) else { return }
 
         // Ranging-based hysteresis (handleDidRange miss counter) handles exit
         // in most cases. However, when the OS fires didExitRegion, ranging may
@@ -455,7 +603,7 @@ extension ExpoBeaconModule {
     }
 
     func handleMonitoringDidFail(for region: CLRegion?, withError error: Error) {
-        let id = region?.identifier ?? "unknown"
+        let id = region.flatMap { publicRegionIdentifier(for: $0) } ?? region?.identifier ?? "unknown"
         // Qualified — ExpoModulesCore also exports a `Logger` type.
         os.Logger(subsystem: "expo.modules.beacon", category: "monitoring")
             .error("Monitoring failed for region \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -481,9 +629,12 @@ extension ExpoBeaconModule {
             scanTimer = nil
             // Stop all scan constraints
             for sc in scanConstraints {
-                locationManager.stopRangingBeacons(satisfying: sc)
+                if !continuousScanOnlyConstraints.contains(where: { $0 == sc }) {
+                    locationManager.stopRangingBeacons(satisfying: sc)
+                }
             }
             scanConstraints.removeAll()
+            scanRequestID = nil
             scannedBeacons.removeAll()
             scanPromise?.reject("RANGING_FAILED", "Beacon ranging failed: \(error.localizedDescription)")
             scanPromise = nil
@@ -498,7 +649,7 @@ extension ExpoBeaconModule {
     /// from a stale prior session.
     func handleDidDetermineState(_ state: CLRegionState, for region: CLRegion) {
         guard let beaconRegion = region as? CLBeaconRegion else { return }
-        let identifier = beaconRegion.identifier
+        guard let identifier = publicRegionIdentifier(for: beaconRegion) else { return }
         switch state {
         case .inside:
             // Pre-seed enter counter so the next ranging cycle completes the enter.

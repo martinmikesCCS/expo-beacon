@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import ExpoBeacon from "../ExpoBeaconModule.js";
 import type {
   BeaconDistanceEvent,
   BeaconErrorEvent,
@@ -9,8 +8,6 @@ import type {
   BeaconRegionEvent,
   BeaconScanResult,
   BeaconTimeoutEvent,
-  CarPlayNotificationConfig,
-  CarPlayNotificationSettings,
   EddystoneDistanceEvent,
   EddystoneRegionEvent,
   EddystoneScanResult,
@@ -24,6 +21,7 @@ import type {
   PairedBeacon,
   PairedEddystone,
 } from "../ExpoBeacon.types";
+import ExpoBeacon from "../ExpoBeaconModule.js";
 
 /**
  * A monitored beacon that is currently within range, as tracked by
@@ -143,11 +141,6 @@ export interface UseBeaconResult {
   setBeaconNotificationConfig: (
     config: BeaconNotificationSettings | BeaconNotificationConfig,
   ) => void;
-  /** Persist only CarPlay / Android Auto notification settings. */
-  setCarPlayNotificationConfig: (
-    config: CarPlayNotificationSettings | CarPlayNotificationConfig,
-  ) => void;
-
   /** Enable SQLite event logging (updates `isEventLoggingEnabled`). */
   enableEventLogging: () => void;
   /** Disable SQLite event logging (updates `isEventLoggingEnabled`). */
@@ -210,18 +203,51 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
   const refreshPaired = useCallback(() => {
     setPairedBeacons(ExpoBeacon.getPairedBeacons());
     setPairedEddystones(ExpoBeacon.getPairedEddystones());
+    setIsMonitoring(ExpoBeacon.getMonitoringConfig().isMonitoring);
   }, []);
 
-  // Seed reactive state from the native snapshot on mount. Wrapped in try/catch
-  // because the web stub throws for these getters (unsupported platform).
+  const readInRangeSnapshot = useCallback(() => {
+    const now = Date.now();
+    const seed: Record<string, InRangeBeacon> = {};
+    for (const state of ExpoBeacon.getMonitoredDeviceStates()) {
+      if (state.state !== "entered") continue;
+      seed[state.identifier] =
+        state.kind === "ibeacon"
+          ? {
+              kind: "ibeacon",
+              identifier: state.identifier,
+              uuid: state.uuid,
+              major: state.major,
+              minor: state.minor,
+              distance: state.distance ?? -1,
+              lastSeen: now,
+            }
+          : {
+              kind: "eddystone",
+              identifier: state.identifier,
+              namespace: state.namespace,
+              instance: state.instance,
+              distance: state.distance ?? -1,
+              lastSeen: now,
+            };
+    }
+    return seed;
+  }, []);
+
+  const removeFromInRange = useCallback((identifier: string) => {
+    setInRangeMap((current) => {
+      if (!(identifier in current)) return current;
+      const next = { ...current };
+      delete next[identifier];
+      return next;
+    });
+  }, []);
+
+  // Seed platform state on mount. Wrapped in try/catch because the web stub
+  // throws for these getters (unsupported platform).
   useEffect(() => {
     try {
       refreshPaired();
-    } catch {
-      /* unsupported platform */
-    }
-    try {
-      setIsMonitoring(ExpoBeacon.getMonitoringConfig().isMonitoring);
     } catch {
       /* unsupported platform */
     }
@@ -230,37 +256,22 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
     } catch {
       /* unsupported platform */
     }
-    if (handlers.current.track === false) return;
-    try {
-      const now = Date.now();
-      const seed: Record<string, InRangeBeacon> = {};
-      for (const s of ExpoBeacon.getMonitoredDeviceStates()) {
-        if (s.state !== "entered") continue;
-        seed[s.identifier] =
-          s.kind === "ibeacon"
-            ? {
-                kind: "ibeacon",
-                identifier: s.identifier,
-                uuid: s.uuid,
-                major: s.major,
-                minor: s.minor,
-                distance: s.distance ?? -1,
-                lastSeen: now,
-              }
-            : {
-                kind: "eddystone",
-                identifier: s.identifier,
-                namespace: s.namespace,
-                instance: s.instance,
-                distance: s.distance ?? -1,
-                lastSeen: now,
-              };
-      }
-      setInRangeMap(seed);
-    } catch {
-      /* unsupported platform */
-    }
   }, [refreshPaired]);
+
+  // Clear stale entries as soon as tracking is disabled and re-seed from the
+  // native source of truth when it is enabled again.
+  const shouldTrack = options.track !== false;
+  useEffect(() => {
+    if (!shouldTrack) {
+      setInRangeMap({});
+      return;
+    }
+    try {
+      setInRangeMap(readInRangeSnapshot());
+    } catch {
+      setInRangeMap({});
+    }
+  }, [readInRangeSnapshot, shouldTrack]);
 
   // Subscribe to all beacon events once; route to inRange state + callbacks.
   useEffect(() => {
@@ -379,16 +390,18 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
         name,
         timeoutSeconds,
       );
+      removeFromInRange(identifier);
       refreshPaired();
     },
-    [refreshPaired],
+    [refreshPaired, removeFromInRange],
   );
   const unpairBeacon = useCallback(
     (identifier: string) => {
       ExpoBeacon.unpairBeacon(identifier);
+      removeFromInRange(identifier);
       refreshPaired();
     },
-    [refreshPaired],
+    [refreshPaired, removeFromInRange],
   );
   const pairEddystone = useCallback<UseBeaconResult["pairEddystone"]>(
     (identifier, namespace, instance, name, timeoutSeconds) => {
@@ -399,16 +412,18 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
         name,
         timeoutSeconds,
       );
+      removeFromInRange(identifier);
       refreshPaired();
     },
-    [refreshPaired],
+    [refreshPaired, removeFromInRange],
   );
   const unpairEddystone = useCallback(
     (identifier: string) => {
       ExpoBeacon.unpairEddystone(identifier);
+      removeFromInRange(identifier);
       refreshPaired();
     },
-    [refreshPaired],
+    [refreshPaired, removeFromInRange],
   );
 
   const scanForBeacons = useCallback(
@@ -463,12 +478,6 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
       ExpoBeacon.setBeaconNotificationConfig(config),
     [],
   );
-  const setCarPlayNotificationConfig = useCallback(
-    (config: CarPlayNotificationSettings | CarPlayNotificationConfig) =>
-      ExpoBeacon.setCarPlayNotificationConfig(config),
-    [],
-  );
-
   const enableEventLogging = useCallback(() => {
     ExpoBeacon.enableEventLogging();
     setIsEventLoggingEnabled(true);
@@ -533,7 +542,6 @@ export function useBeacon(options: UseBeaconOptions = {}): UseBeaconResult {
     getMonitoredDeviceStates,
     setNotificationConfig,
     setBeaconNotificationConfig,
-    setCarPlayNotificationConfig,
     enableEventLogging,
     disableEventLogging,
     getEventLogs,

@@ -36,6 +36,7 @@ public class ExpoBeaconModule: Module {
     internal var scannedBeacons: [CLBeacon] = []
     internal var scanConstraints: [CLBeaconIdentityConstraint] = []
     internal var scanTimer: DispatchWorkItem?
+    internal var scanRequestID: UUID?
 
     // MARK: - Monitoring state
 
@@ -70,6 +71,7 @@ public class ExpoBeaconModule: Module {
     internal var eddystoneScanPromise: Promise?
     internal var eddystoneScannedBeacons: [[String: Any]] = []
     internal var eddystoneScanTimer: DispatchWorkItem?
+    internal var eddystonePendingScanDurationMs: Int?
 
     // Eddystone monitoring
     internal var eddystoneMonitoringActive = false
@@ -106,12 +108,13 @@ public class ExpoBeaconModule: Module {
     /// authorization change.
     internal var permissionCompletions: [(Bool) -> Void] = []
 
-    // MARK: - CarPlay
+    /// Prevents delayed callbacks from reactivating a destroyed module.
+    internal var isModuleDestroyed = false
 
-    /// Observer token for `UIApplication.didBecomeActiveNotification` used to
-    /// resync CarPlay state on foreground. Owned by the CarPlay extension —
-    /// declared here so the module instance can hold it across calls.
-    internal var carPlayForegroundObserver: NSObjectProtocol?
+    // MARK: - Foreground reconciliation
+
+    internal var eddystoneForegroundObserver: NSObjectProtocol?
+    internal var eddystoneForegroundGraceUntil: Date?
 
     // MARK: - Cached paired data (invalidated on pair/unpair)
 
@@ -125,7 +128,7 @@ public class ExpoBeaconModule: Module {
 
     // MARK: - Native API forwarder (fire-and-forget HTTP)
 
-    internal lazy var apiForwarder = BeaconApiForwarder(defaults: defaults)
+    internal let apiForwarder = BeaconApiForwarder.shared
 
     // MARK: - Timers
 
@@ -166,31 +169,19 @@ public class ExpoBeaconModule: Module {
     // MARK: - Lifecycle (runs on main — see OnCreate/OnDestroy)
 
     private func setUpOnCreate() {
+        guard !isModuleDestroyed else { return }
         // Touch the lazy CLLocationManager here so it is created on the main
         // thread and its delegate callbacks (incl. permission grants) arrive.
         _ = locationManager
         migrateUserDefaultsIfNeeded()
-        // If the user previously enabled CarPlay monitoring, restart it now —
-        // the module may have been recreated after the app was killed and
-        // background-launched (e.g. via a CLLocationManager region wake).
-        // Without this, CarPlay state changes that happened during suspension
-        // would be missed until JS calls startCarPlayMonitoring() again.
-        if defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
-            startCarPlayMonitoringInternal()
-            // Cross-process reconciliation: if the previous process recorded
-            // CarPlay as connected but the current audio route is no longer
-            // CarPlay, emit a synthetic disconnect so JS listeners attached
-            // to this freshly-created module learn the session ended.
-            CarPlayMonitor.shared.reconcileOnProcessStart()
-        }
         // Restart beacon ranging on process recreation (background relaunch via
         // SLC, Visit, or region-entry wake). iOS persists CLBeaconRegion monitoring
         // at the OS level so the app is woken on region boundary crossings, but
         // ranging is per-process and stops when the process is terminated.
         // Without restarting here, handleDidRange callbacks never fire until JS
         // explicitly calls startMonitoring() — causing the observed 2-5 min
-        // detection delay when CarPlay is active and the app has been sleeping
-        // for days. ENTER_HYSTERESIS_COUNT=1, so the first valid ranging reading
+        // detection delay after the app process has been reclaimed.
+        // ENTER_HYSTERESIS_COUNT=1, so the first valid ranging reading
         // fires onBeaconEnter within ~1 s of ranging resuming.
         if defaults.bool(forKey: IS_MONITORING_KEY) {
             let authStatus = locationManager.authorizationStatus
@@ -202,41 +193,41 @@ public class ExpoBeaconModule: Module {
                 for region in monitoredRegions {
                     locationManager.requestState(for: region)
                 }
+            } else if !loadPairedEddystonesRaw().isEmpty {
+                // CoreBluetooth monitoring remains available when location
+                // permission was revoked or was never requested.
+                startEddystoneMonitoring()
             }
         }
     }
 
     private func tearDownOnDestroy() {
+        isModuleDestroyed = true
+        permissionCompletions.removeAll()
         loggingEnabled = false
         eventLogger = nil
         stopRegionMonitoring()
         stopEddystoneMonitoring()
-        // Only tear down CarPlay observation when the user has explicitly
-        // disabled it. Otherwise leave `CarPlayMonitor.shared` running so
-        // that route changes continue to be observed across module recreations
-        // (e.g. background-launch wake → module re-init → OnDestroy on suspend).
-        if !defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY) {
-            CarPlayMonitor.shared.stop()
-        }
-        // Foreground observer is bound to this module instance — always
-        // remove it on destroy to avoid leaking observers across recreations.
-        removeAppForegroundObserverForCarPlay()
         centralManager?.stopScan()
         centralManager = nil
+        continuousScanActive = false
         scanTimer?.cancel()
         scanTimer = nil
         eddystoneScanTimer?.cancel()
         eddystoneScanTimer = nil
+        eddystonePendingScanDurationMs = nil
         for constraint in scanConstraints {
             locationManager.stopRangingBeacons(satisfying: constraint)
         }
         scanConstraints.removeAll()
+        scanRequestID = nil
         for constraint in continuousScanOnlyConstraints {
             locationManager.stopRangingBeacons(satisfying: constraint)
         }
         continuousScanOnlyConstraints.removeAll()
         scanPromise = nil
         eddystoneScanPromise = nil
+        locationManager.delegate = nil
     }
 
     // MARK: - Module Definition
@@ -253,7 +244,7 @@ public class ExpoBeaconModule: Module {
             }
         }
 
-        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError", "onCarPlayConnected", "onCarPlayDisconnected")
+        Events("onBeaconEnter", "onBeaconExit", "onBeaconDistance", "onBeaconTimeout", "onBeaconFound", "onEddystoneFound", "onEddystoneEnter", "onEddystoneExit", "onEddystoneDistance", "onEddystoneTimeout", "onBeaconError")
 
         // MARK: - Scan
 
@@ -268,9 +259,12 @@ public class ExpoBeaconModule: Module {
                     self.scanTimer?.cancel()
                     self.scanTimer = nil
                     for constraint in self.scanConstraints {
-                        self.locationManager.stopRangingBeacons(satisfying: constraint)
+                        if !self.continuousScanOnlyConstraints.contains(where: { $0 == constraint }) {
+                            self.locationManager.stopRangingBeacons(satisfying: constraint)
+                        }
                     }
                     self.scanConstraints.removeAll()
+                    self.scanRequestID = nil
                     self.scannedBeacons.removeAll()
                     self.scanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled")
                     self.scanPromise = nil
@@ -279,10 +273,11 @@ public class ExpoBeaconModule: Module {
                 if self.eddystoneScanPromise != nil {
                     self.eddystoneScanTimer?.cancel()
                     self.eddystoneScanTimer = nil
-                    self.stopBleScanIfUnneeded()
+                    self.eddystonePendingScanDurationMs = nil
                     self.eddystoneScannedBeacons.removeAll()
                     self.eddystoneScanPromise?.reject("SCAN_CANCELLED", "Scan was cancelled")
                     self.eddystoneScanPromise = nil
+                    self.stopBleScanIfUnneeded()
                 }
             }
         }
@@ -297,10 +292,7 @@ public class ExpoBeaconModule: Module {
 
         Function("unpairBeacon") { (identifier: String) in
             self.onMainSync {
-                var beacons = self.loadPairedBeaconsRaw()
-                beacons.removeAll { ($0["identifier"] as? String) == identifier }
-                self.defaults.set(beacons, forKey: PAIRED_BEACONS_KEY)
-                self.cachedPairedBeacons = nil
+                self.unpairBeacon(identifier: identifier)
             }
         }
 
@@ -318,10 +310,7 @@ public class ExpoBeaconModule: Module {
 
         Function("unpairEddystone") { (identifier: String) in
             self.onMainSync {
-                var eddystones = self.loadPairedEddystonesRaw()
-                eddystones.removeAll { ($0["identifier"] as? String) == identifier }
-                self.defaults.set(eddystones, forKey: PAIRED_EDDYSTONES_KEY)
-                self.cachedPairedEddystones = nil
+                self.unpairEddystone(identifier: identifier)
             }
         }
 
@@ -338,14 +327,6 @@ public class ExpoBeaconModule: Module {
         Function("setBeaconNotificationConfig") { (config: [String: Any]) in
             self.updateNotificationSection(
                 "beacons",
-                config: config,
-                nestedKeys: ["events", "foregroundService", "channel"]
-            )
-        }
-
-        Function("setCarPlayNotificationConfig") { (config: [String: Any]) in
-            self.updateNotificationSection(
-                "carPlay",
                 config: config,
                 nestedKeys: ["events", "foregroundService", "channel"]
             )
@@ -380,72 +361,29 @@ public class ExpoBeaconModule: Module {
             }
         }.runOnQueue(.main)
 
-        // MARK: - CarPlay
-
-        AsyncFunction("startCarPlayMonitoring") { (promise: Promise) in
-            self.defaults.set(true, forKey: CARPLAY_MONITORING_ENABLED_KEY)
-            self.startCarPlayMonitoringInternal()
-            promise.resolve(nil)
-        }.runOnQueue(.main)
-
-        AsyncFunction("stopCarPlayMonitoring") { (promise: Promise) in
-            self.defaults.set(false, forKey: CARPLAY_MONITORING_ENABLED_KEY)
-            CarPlayMonitor.shared.stop()
-            self.stopCarPlayBackgroundWakes()
-            self.removeAppForegroundObserverForCarPlay()
-            promise.resolve(nil)
-        }.runOnQueue(.main)
-
-        Function("isCarPlayMonitoringEnabled") { () -> Bool in
-            return self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY)
-        }
-
-        Function("getCarPlayConnectionStatus") { () -> [String: Any] in
-            // Read the state persisted by CarPlayMonitor at connect/disconnect
-            // time — transport and timestamp reflect the actual last connect,
-            // never a value fabricated at query time.
-            let connected = self.defaults.bool(forKey: CARPLAY_LAST_CONNECTED_KEY)
-            var out: [String: Any] = ["connected": connected]
-            if connected {
-                if let transport = self.defaults.string(forKey: CARPLAY_LAST_TRANSPORT_KEY) {
-                    out["transport"] = transport
-                }
-                if let ts = self.defaults.object(forKey: CARPLAY_LAST_CONNECTED_AT_KEY) as? Double {
-                    out["timestamp"] = ts
-                    out["timestampIso"] = CarPlayMonitor.isoFormatter.string(from: Date(timeIntervalSince1970: ts / 1000.0))
-                }
-            }
-            return out
-        }
-
-        Function("getCarPlayDiagnostics") { () -> [String: Any] in
-            // iOS detection is via AVAudioSession, not a content provider —
-            // most diagnostic fields aren't applicable. Returning constants
-            // keeps the cross-platform JS surface uniform.
-            return [
-                "isCarAppMetadataPresent": true,
-                "isCarProviderQueryable": true,
-                "lastRawConnectionType": NSNull(),
-                "observerActive": self.defaults.bool(forKey: CARPLAY_MONITORING_ENABLED_KEY),
-                "serviceAlive": true,
-            ]
-        }
-
         // MARK: - Continuous Scan
 
         Function("startContinuousScan") { () -> Void in
             self.onMainSync {
                 guard !self.continuousScanActive else { return }
                 self.continuousScanActive = true
-                // Ranging requires location authorization — request it before starting.
-                self.requestLocationPermission { granted in
-                    guard granted, self.continuousScanActive else {
-                        self.continuousScanActive = false
+                // Start the CoreBluetooth half immediately; only iBeacon ranging
+                // is gated by CoreLocation authorization.
+                self.ensureBleScanRunning()
+
+                let pairedUUIDs = self.uniquePairedBeaconUUIDs()
+                guard !pairedUUIDs.isEmpty else { return }
+                self.requestLocationPermission { [weak self] granted in
+                    guard let self, !self.isModuleDestroyed, self.continuousScanActive else { return }
+                    guard granted else {
+                        self.sendLoggedEvent("onBeaconError", [
+                            "identifier": "",
+                            "code": "PERMISSION_DENIED",
+                            "message": "Location permission required for continuous iBeacon scanning; Eddystone scanning remains active"
+                        ])
                         return
                     }
-                    self.startContinuousScanRanging()
-                    // Also start BLE scanning for Eddystone beacons
-                    self.ensureBleScanRunning()
+                    self.startContinuousScanRanging(uuids: pairedUUIDs)
                 }
             }
         }
@@ -454,7 +392,9 @@ public class ExpoBeaconModule: Module {
             self.onMainSync {
                 self.continuousScanActive = false
                 for constraint in self.continuousScanOnlyConstraints {
-                    self.locationManager.stopRangingBeacons(satisfying: constraint)
+                    if !self.scanConstraints.contains(where: { $0 == constraint }) {
+                        self.locationManager.stopRangingBeacons(satisfying: constraint)
+                    }
                 }
                 self.continuousScanOnlyConstraints.removeAll()
                 self.stopBleScanIfUnneeded()

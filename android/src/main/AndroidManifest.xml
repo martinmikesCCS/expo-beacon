@@ -27,25 +27,13 @@
     <!-- Receive boot broadcast to restart monitoring after device reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Required by the optional HTTP API event forwarder. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Battery optimization exemption for reliable background BLE scanning -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
-
-    <!--
-         Package-visibility declaration required by Android 11+ so that
-         androidx.car.app's CarConnection can resolve the Android Auto /
-         Automotive OS content provider. Without this, CarConnection.type
-         silently reports CONNECTION_TYPE_NOT_CONNECTED on freshly-started
-         processes (e.g. after the foreground service is revived via
-         START_STICKY following a swipe-away), causing spurious disconnect
-         events.
-    -->
-    <queries>
-        <intent>
-            <action android:name="androidx.car.app.connection.action.CAR_PROVIDER" />
-        </intent>
-    </queries>
 
     <application>
         <!-- AltBeacon background scanning service -->
@@ -78,22 +66,15 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <!-- Direct-boot phase boot (Android 7+). Harmless without
-                     directBootAware="true"; declaring early so the only
-                     follow-up needed for true direct-boot support is that
-                     single attribute. -->
-                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <!-- Restart observers after the host app is updated. -->
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <!-- Self-scheduled retry when BT isn't ready at boot -->
-                <action android:name="expo.modules.beacon.ACTION_RETRY_MONITORING" />
-                <!-- Self-scheduled CarPlay watchdog (11-min cadence; above
-                     setExactAndAllowWhileIdle per-app quota). -->
-                <action android:name="expo.modules.beacon.ACTION_CARPLAY_WATCHDOG" />
-                <!-- Near-term keepalive armed when the app task is swiped away. -->
-                <action android:name="expo.modules.beacon.ACTION_TASK_REMOVED_KEEPALIVE" />
             </intent-filter>
         </receiver>
+
+        <!-- Explicit app-owned alarms are isolated from external broadcasts. -->
+        <receiver
+            android:name="expo.modules.beacon.BeaconInternalReceiver"
+            android:enabled="true"
+            android:exported="false" />
     </application>
 
 </manifest>

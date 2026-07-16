@@ -33,6 +33,8 @@ extension ExpoBeaconModule {
         }
 
         scanPromise = promise
+        let requestID = UUID()
+        scanRequestID = requestID
 
         // Build UUID list — iOS cannot do wildcard iBeacon scans via CoreBluetooth
         // (Apple strips iBeacon data from BLE advertisements). When no UUIDs are
@@ -45,26 +47,39 @@ extension ExpoBeaconModule {
                     "iOS does not support wildcard iBeacon scanning. " +
                     "Provide at least one proximity UUID, or pair beacons first.")
                 scanPromise = nil
+                scanRequestID = nil
                 return
             }
         } else {
+            var seenUUIDs = Set<UUID>()
             for uuidStr in uuids {
                 guard let uuid = UUID(uuidString: uuidStr) else {
                     rejectAndEmit(promise, "INVALID_UUID", "Invalid UUID: \(uuidStr)")
                     scanPromise = nil
+                    scanRequestID = nil
                     return
                 }
-                parsedUUIDs.append(uuid)
+                if seenUUIDs.insert(uuid).inserted {
+                    parsedUUIDs.append(uuid)
+                }
             }
         }
 
         scannedBeacons = []
         scanConstraints = []
 
-        requestLocationPermission { granted in
+        requestLocationPermission { [weak self] granted in
+            guard let self, !self.isModuleDestroyed else {
+                promise.reject("MODULE_DESTROYED", "Beacon module was destroyed while requesting permission")
+                return
+            }
+            // The request may have been cancelled (and another scan started)
+            // while the system permission sheet was open.
+            guard self.scanRequestID == requestID, self.scanPromise != nil else { return }
             guard granted else {
                 self.rejectAndEmit(promise, "PERMISSION_DENIED", "Location permission required for beacon scanning")
                 self.scanPromise = nil
+                self.scanRequestID = nil
                 return
             }
 
@@ -72,7 +87,9 @@ extension ExpoBeaconModule {
             for uuid in parsedUUIDs {
                 let constraint = CLBeaconIdentityConstraint(uuid: uuid)
                 self.scanConstraints.append(constraint)
-                self.locationManager.startRangingBeacons(satisfying: constraint)
+                if !self.continuousScanOnlyConstraints.contains(where: { $0 == constraint }) {
+                    self.locationManager.startRangingBeacons(satisfying: constraint)
+                }
             }
 
             let timer = DispatchWorkItem { [weak self] in
@@ -86,11 +103,14 @@ extension ExpoBeaconModule {
     // Start UUID-only ranging for each unique paired-beacon UUID.
     // UUID-only constraints discover ALL beacons advertising that UUID,
     // not just the specific major/minor that was paired.
-    func startContinuousScanRanging() {
-        for uuid in uniquePairedBeaconUUIDs() {
+    func startContinuousScanRanging(uuids: [UUID]? = nil) {
+        for uuid in uuids ?? uniquePairedBeaconUUIDs() {
             let constraint = CLBeaconIdentityConstraint(uuid: uuid)
+            guard !continuousScanOnlyConstraints.contains(where: { $0 == constraint }) else { continue }
             continuousScanOnlyConstraints.append(constraint)
-            locationManager.startRangingBeacons(satisfying: constraint)
+            if !scanConstraints.contains(where: { $0 == constraint }) {
+                locationManager.startRangingBeacons(satisfying: constraint)
+            }
         }
     }
 
@@ -99,12 +119,15 @@ extension ExpoBeaconModule {
         scanTimer = nil
 
         for constraint in scanConstraints {
-            locationManager.stopRangingBeacons(satisfying: constraint)
+            if !continuousScanOnlyConstraints.contains(where: { $0 == constraint }) {
+                locationManager.stopRangingBeacons(satisfying: constraint)
+            }
         }
         scanConstraints.removeAll()
+        scanRequestID = nil
 
         var seen = Set<String>()
-        let results: [[String: Any]] = scannedBeacons.compactMap { beacon in
+        let results: [[String: Any]] = scannedBeacons.reversed().compactMap { beacon in
             let key = "\(beacon.uuid):\(beacon.major):\(beacon.minor)"
             guard !seen.contains(key) else { return nil }
             seen.insert(key)

@@ -1,12 +1,22 @@
 import Foundation
 import CoreBluetooth
+import UIKit
 
 extension ExpoBeaconModule {
     // MARK: - Eddystone scanning (one-shot)
 
     func startEddystoneScan(durationMs: Int) {
+        eddystonePendingScanDurationMs = durationMs
         ensureBleScanRunning()
 
+        armEddystoneScanTimerIfReady()
+    }
+
+    func armEddystoneScanTimerIfReady() {
+        guard eddystoneScanTimer == nil,
+              eddystoneScanPromise != nil,
+              centralManager?.state == .poweredOn,
+              let durationMs = eddystonePendingScanDurationMs else { return }
         let timer = DispatchWorkItem { [weak self] in
             self?.stopEddystoneScanAndResolve()
         }
@@ -17,7 +27,7 @@ extension ExpoBeaconModule {
     func stopEddystoneScanAndResolve() {
         eddystoneScanTimer?.cancel()
         eddystoneScanTimer = nil
-        stopBleScanIfUnneeded()
+        eddystonePendingScanDurationMs = nil
 
         // Deduplicate: by namespace:instance for UID, by url for URL
         var seen = Set<String>()
@@ -39,6 +49,7 @@ extension ExpoBeaconModule {
         eddystoneScanPromise?.resolve(deduped)
         eddystoneScanPromise = nil
         eddystoneScannedBeacons = []
+        stopBleScanIfUnneeded()
     }
 
     // MARK: - Eddystone frame parsing
@@ -128,6 +139,9 @@ extension ExpoBeaconModule {
               let data = serviceData[EDDYSTONE_SERVICE_UUID] else { return }
 
         let beaconRssi = rssi.intValue
+        // CoreBluetooth uses 127 when RSSI is unavailable. Treating it as a
+        // strong signal would yield a near-zero distance and a false enter.
+        guard beaconRssi != 127 else { return }
         guard let beacon = ExpoBeaconModule.parseEddystoneFrame(data: data, rssi: beaconRssi) else { return }
 
         // Augment with the BLE advertising device name if present
@@ -163,8 +177,9 @@ extension ExpoBeaconModule {
                   pns.lowercased() == ns && pinst.lowercased() == inst else { continue }
 
             eddystoneLatestSeen[identifier] = Date()
-            // Valid BLE reading — reset inactivity timer.
-            rescheduleEddystoneInactivity(identifier: identifier, namespace: ns, instance: inst)
+            if eddystoneEnteredRegions.contains(identifier) {
+                cancelEddystoneTimeout(identifier: identifier)
+            }
 
             // Distance-driven enter/exit with hysteresis — evaluated on every
             // BLE callback (not throttled) so the hysteresis counters advance
@@ -221,6 +236,12 @@ extension ExpoBeaconModule {
                 }
             }
 
+            // Inactivity only applies while logically entered. Scheduling it
+            // for far-but-visible beacons would later reset an exit timeout.
+            if eddystoneEnteredRegions.contains(identifier) {
+                rescheduleEddystoneInactivity(identifier: identifier, namespace: ns, instance: inst)
+            }
+
             guard hasValidDistance else { break }
             guard self.eventLevel == "all" else { break }
 
@@ -247,6 +268,7 @@ extension ExpoBeaconModule {
     // MARK: - BLE scan lifecycle
 
     func ensureBleScanRunning() {
+        guard !isModuleDestroyed else { return }
         if centralManager == nil {
             centralManager = CBCentralManager(
                 delegate: bluetoothDelegate,
@@ -261,6 +283,12 @@ extension ExpoBeaconModule {
         }
     }
 
+    func handleBluetoothPoweredOn() {
+        guard !isModuleDestroyed else { return }
+        ensureBleScanRunning()
+        armEddystoneScanTimerIfReady()
+    }
+
     /// Rejects an in-flight one-shot Eddystone scan and disarms its timer so a
     /// stale timer cannot prematurely resolve a future scan. Safe to call when
     /// no scan is active.
@@ -268,6 +296,7 @@ extension ExpoBeaconModule {
         guard eddystoneScanPromise != nil else { return }
         eddystoneScanTimer?.cancel()
         eddystoneScanTimer = nil
+        eddystonePendingScanDurationMs = nil
         eddystoneScannedBeacons.removeAll()
         eddystoneScanPromise?.reject(code, message)
         eddystoneScanPromise = nil
@@ -275,7 +304,7 @@ extension ExpoBeaconModule {
     }
 
     func stopBleScanIfUnneeded() {
-        guard eddystoneScanTimer == nil && !continuousScanActive && !eddystoneMonitoringActive else { return }
+        guard eddystoneScanPromise == nil && !continuousScanActive && !eddystoneMonitoringActive else { return }
         centralManager?.stopScan()
         centralManager = nil
     }
@@ -283,8 +312,13 @@ extension ExpoBeaconModule {
     // MARK: - Eddystone monitoring
 
     func startEddystoneMonitoring() {
+        if eddystoneMonitoringActive {
+            ensureBleScanRunning()
+            return
+        }
         eddystoneMonitoringActive = true
         ensureBleScanRunning()
+        observeForegroundForEddystone()
 
         // Timer to detect exit (beacon disappears from BLE advertisements).
         // Add it to the main run loop explicitly — Timer.scheduledTimer uses the
@@ -300,6 +334,8 @@ extension ExpoBeaconModule {
         eddystoneMonitoringActive = false
         eddystoneMonitoringTimer?.invalidate()
         eddystoneMonitoringTimer = nil
+        removeForegroundObserverForEddystone()
+        eddystoneForegroundGraceUntil = nil
         eddystoneLatestSeen.removeAll()
         eddystoneEnteredRegions.removeAll()
         eddystoneEnterCounters.removeAll()
@@ -318,6 +354,13 @@ extension ExpoBeaconModule {
     }
 
     func eddystoneMonitoringTick() {
+        // In the background iOS ignores AllowDuplicates and coalesces static
+        // advertisements. Absence of callbacks is therefore not proof of exit.
+        guard UIApplication.shared.applicationState == .active else { return }
+        if let graceUntil = eddystoneForegroundGraceUntil {
+            guard Date() >= graceUntil else { return }
+            eddystoneForegroundGraceUntil = nil
+        }
         guard !eddystoneEnteredRegions.isEmpty else { return }
 
         let now = Date()
@@ -377,5 +420,29 @@ extension ExpoBeaconModule {
             "code": code,
             "message": message
         ])
+    }
+
+    func observeForegroundForEddystone() {
+        guard eddystoneForegroundObserver == nil else { return }
+        eddystoneForegroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.eddystoneMonitoringActive else { return }
+            // Restarting creates a new discovery window after background
+            // coalescing. Give present beacons time to refresh lastSeen before
+            // evaluating a potentially old timestamp.
+            self.eddystoneForegroundGraceUntil = Date().addingTimeInterval(EDDYSTONE_RECENTLY_SEEN_THRESHOLD)
+            self.centralManager?.stopScan()
+            self.ensureBleScanRunning()
+        }
+    }
+
+    func removeForegroundObserverForEddystone() {
+        if let observer = eddystoneForegroundObserver {
+            NotificationCenter.default.removeObserver(observer)
+            eddystoneForegroundObserver = nil
+        }
     }
 }

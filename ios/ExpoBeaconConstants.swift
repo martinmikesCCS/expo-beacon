@@ -18,17 +18,14 @@ internal let EVENT_LOGGING_ENABLED_KEY = "expo.beacon.event_logging_enabled"
 internal let MIN_RSSI_KEY = "expo.beacon.min_rssi"
 internal let EVENT_LEVEL_KEY = "expo.beacon.event_level"
 internal let EXIT_TIMEOUT_SECONDS_KEY = "expo.beacon.exit_timeout_seconds"
-internal let CARPLAY_MONITORING_ENABLED_KEY = "expo.beacon.carplay_monitoring_enabled"
-/// Persisted last-known CarPlay connection state. Used by `CarPlayMonitor` to
-/// reconcile across process recreations (e.g. background-launch wake) and emit
-/// a synthetic `onCarPlayDisconnected` if the route is no longer CarPlay.
-internal let CARPLAY_LAST_CONNECTED_KEY = "expo.beacon.carplay_last_connected"
-/// Persisted transport of the last CarPlay connect (e.g. "wired", "wireless", "unknown").
-internal let CARPLAY_LAST_TRANSPORT_KEY = "expo.beacon.carplay_last_transport"
-/// Persisted Unix-millisecond timestamp of the last CarPlay connect.
-internal let CARPLAY_LAST_CONNECTED_AT_KEY = "expo.beacon.carplay_last_connected_at"
 /// Flag marking that values were migrated from UserDefaults.standard to the suite.
 internal let SUITE_MIGRATION_FLAG_KEY = "expo.beacon.migrated_to_suite_v1"
+
+// MARK: - Core Location ownership
+
+/// `CLRegion.identifier` values are app-wide. Prefix module-owned regions so
+/// they cannot replace host-app geofences that use the same public identifier.
+internal let BEACON_REGION_IDENTIFIER_PREFIX = "expo.modules.beacon.region."
 
 // MARK: - API forwarder keys
 

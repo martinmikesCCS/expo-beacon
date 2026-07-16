@@ -12,12 +12,8 @@ import {
   MonitoredDeviceState,
   EventLogQueryOptions,
   EventLogEntry,
-  CarPlayConnectionStatus,
-  CarPlayDiagnostics,
   BeaconNotificationConfig,
   BeaconNotificationSettings,
-  CarPlayNotificationConfig,
-  CarPlayNotificationSettings,
 } from "./ExpoBeacon.types";
 
 export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvents> {
@@ -105,19 +101,11 @@ export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvent
   setNotificationConfig(config: NotificationConfig): void;
 
   /**
-   * Persist only beacon notification settings without replacing CarPlay settings.
+   * Persist beacon notification settings without replacing other beacon settings.
    * Passing a plain BeaconNotificationConfig is treated as the beacon event config.
    */
   setBeaconNotificationConfig(
     config: BeaconNotificationSettings | BeaconNotificationConfig,
-  ): void;
-
-  /**
-   * Persist only CarPlay / Android Auto notification settings without replacing beacon settings.
-   * Passing a plain CarPlayNotificationConfig is treated as the CarPlay event config.
-   */
-  setCarPlayNotificationConfig(
-    config: CarPlayNotificationSettings | CarPlayNotificationConfig,
   ): void;
 
   /**
@@ -244,79 +232,6 @@ export declare class ExpoBeaconModule extends NativeModule<ExpoBeaconModuleEvent
     apiKey: string | null;
     id: string | null;
   };
-
-  /**
-   * Start observing CarPlay (iOS) / Android Auto (Android) connection state.
-   *
-   * Emits `onCarPlayConnected` and `onCarPlayDisconnected` JS events. Events are
-   * also written to the SQLite event log and forwarded to the configured API
-   * endpoint, and dispatched to native lifecycle plugins (used by the auto-
-   * generated geolocation plugin to start/stop background-geolocation).
-   *
-   * **Persistent.** The enabled state is stored in native preferences and
-   * survives app kill / device reboot. Call `stopCarPlayMonitoring()` to
-   * disable. `startMonitoring()` also enables CarPlay observation
-   * automatically — calling this method explicitly is only required if you
-   * want CarPlay events without beacon monitoring.
-   *
-   * **Background behavior:**
-   * - **Android**: the foreground service hosts the observer and continues to
-   *   receive `CarConnection` events even after the app process is killed and
-   *   restarted via `BootReceiver`. Guaranteed background detection.
-   * - **iOS**: the observer auto-restarts in `OnCreate` whenever the module
-   *   is recreated, including background-launches triggered by beacon region
-   *   monitoring. **iOS cannot wake a terminated app on CarPlay alone** — for
-   *   guaranteed wake-from-suspension, also call `startMonitoring()` with at
-   *   least one paired beacon. Region wake events trigger a CarPlay state
-   *   resync to reconcile any route changes that occurred during suspension.
-   *
-   * - iOS: observes `AVAudioSession.routeChangeNotification` for `.carAudio` ports.
-   *   No CarPlay entitlement required.
-   * - Android: observes `androidx.car.app.connection.CarConnection` LiveData.
-   *   No Android Auto certification required.
-   * - Web: no-op (resolves immediately).
-   */
-  startCarPlayMonitoring(): Promise<void>;
-
-  /**
-   * Stop CarPlay / Android Auto connection monitoring and clear the persisted
-   * "enabled" flag so the observer is not auto-restarted on next launch / boot.
-   *
-   * On Android, if no beacon monitoring is active, the foreground service
-   * stops itself.
-   */
-  stopCarPlayMonitoring(): Promise<void>;
-
-  /**
-   * Returns whether CarPlay / Android Auto observation is currently enabled.
-   * Reads the persisted flag, so the value survives app cold-starts and
-   * reflects the native source of truth (foreground service on Android,
-   * UserDefaults suite on iOS).
-   */
-  isCarPlayMonitoringEnabled(): boolean;
-
-  /**
-   * Returns a snapshot of the current CarPlay / Android Auto connection state
-   * without waiting for an event. Useful on mount to immediately reflect
-   * whether a car session is already active.
-   *
-   * Android reads from the live observer if the foreground service is running,
-   * falling back to the persisted last-known state otherwise. iOS reads the
-   * persisted last-known state, including the last-connect transport and
-   * timestamp.
-   */
-  getCarPlayConnectionStatus(): CarPlayConnectionStatus;
-
-  /**
-   * Returns diagnostic information about the CarPlay / Android Auto detection
-   * pipeline. Use this when `onCarPlayConnected` never fires despite the head
-   * unit being connected — it reveals whether the host app is correctly
-   * registered with Gearhead, whether the connection content provider is
-   * reachable, and the most recent raw value the observer received.
-   *
-   * See {@link CarPlayDiagnostics} for field-level guidance.
-   */
-  getCarPlayDiagnostics(): CarPlayDiagnostics;
 }
 
 // The scan parameters are genuinely optional: both native implementations

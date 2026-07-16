@@ -11,13 +11,12 @@ export function DiagnosticsSection({ addLog }: { addLog: AddLog }) {
     setSnapshot(
       JSON.stringify(
         {
-          carPlayDiagnostics: ExpoBeacon.getCarPlayDiagnostics(),
           monitoringConfig: ExpoBeacon.getMonitoringConfig(),
           monitoredDeviceStates: ExpoBeacon.getMonitoredDeviceStates(),
         },
         null,
-        2,
-      ),
+        2
+      )
     );
     addLog("Diagnostics fetched");
   };
@@ -25,7 +24,7 @@ export function DiagnosticsSection({ addLog }: { addLog: AddLog }) {
   return (
     <Section title="Diagnostics">
       <Text style={styles.hint}>
-        getCarPlayDiagnostics + getMonitoringConfig + getMonitoredDeviceStates
+        getMonitoringConfig + getMonitoredDeviceStates
       </Text>
       <Button title="Fetch Diagnostics" onPress={handleFetch} />
       {snapshot !== null && (

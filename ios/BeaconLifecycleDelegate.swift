@@ -1,3 +1,5 @@
+import Foundation
+
 /// Implement this protocol in your app to react to beacon enter/exit events at the native level.
 ///
 /// Register your implementation once, before the Expo module is created:
@@ -16,19 +18,6 @@ public protocol BeaconLifecycleDelegate: AnyObject {
     func eddystoneDidExit(identifier: String, namespace: String, instance: String, distance: Double)
     func eddystoneDidTimeout(identifier: String, namespace: String, instance: String, distance: Double)
 
-    // MARK: CarPlay
-    /// Called when the device connects to a CarPlay session (wired or wireless).
-    /// Default implementation is empty so existing plugins compile unchanged.
-    func carPlayDidConnect(transport: String)
-    /// Called when the device disconnects from a CarPlay session.
-    /// Default implementation is empty so existing plugins compile unchanged.
-    func carPlayDidDisconnect()
-}
-
-/// Default no-op implementations so adopters only override what they need.
-public extension BeaconLifecycleDelegate {
-    func carPlayDidConnect(transport: String) {}
-    func carPlayDidDisconnect() {}
 }
 
 /// Thread-safe registry for [BeaconLifecycleDelegate] plugins.
@@ -68,13 +57,6 @@ public final class BeaconLifecycleRegistry {
     internal func dispatchEddystoneTimeout(identifier: String, namespace: String, instance: String, distance: Double) {
         snapshot().forEach { $0.eddystoneDidTimeout(identifier: identifier, namespace: namespace, instance: instance, distance: distance) }
     }
-    internal func dispatchCarPlayConnect(transport: String) {
-        snapshot().forEach { $0.carPlayDidConnect(transport: transport) }
-    }
-    internal func dispatchCarPlayDisconnect() {
-        snapshot().forEach { $0.carPlayDidDisconnect() }
-    }
-
     private func snapshot() -> [any BeaconLifecycleDelegate] {
         lock.lock(); defer { lock.unlock() }
         return plugins

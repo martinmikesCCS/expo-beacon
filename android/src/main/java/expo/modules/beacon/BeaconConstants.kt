@@ -7,8 +7,7 @@ package expo.modules.beacon
 // ExpoBeaconModule.swift (iOS).
 
 // SharedPreferences file names and keys. The string values are persisted user
-// data — never change them. CarPlayMonitor's own prefs constants live in its
-// companion (CARPLAY_MONITOR_PREFS / KEY_LAST_CONNECTED).
+// data — never change them.
 internal const val PREFS_NAME = "expo.beacon.paired"
 internal const val PREFS_KEY = "paired_beacons"
 internal const val EDDYSTONE_PREFS_NAME = "expo.beacon.paired_eddystones"
@@ -21,15 +20,13 @@ internal const val MONITORING_OPT_EXIT_DISTANCE = "exit_distance"
 internal const val MONITORING_OPT_MIN_RSSI = "min_rssi"
 internal const val MONITORING_OPT_LEVEL = "level"
 internal const val MONITORING_OPT_EXIT_TIMEOUT_SECONDS = "exit_timeout_seconds"
+/** Wall-clock deadlines for configured post-exit timeout events, keyed by public identifier. */
+internal const val TIMEOUT_DEADLINE_PREFS = "expo.beacon.timeout_deadlines"
 internal const val EVENT_LOGGING_PREFS = "expo.beacon.event_logging"
 internal const val EVENT_LOGGING_ENABLED_KEY = "enabled"
 internal const val MONITORING_ACTIVE_PREFS = "expo.beacon.is_monitoring"
 internal const val MONITORING_ACTIVE_KEY = "active"
-internal const val CARPLAY_ENABLED_PREFS = "expo.beacon.carplay_enabled"
-internal const val CARPLAY_ENABLED_KEY = "enabled"
 /** Tracks what the JS layer last received — used for reconciled-disconnect on module rebind. */
-internal const val CARPLAY_JS_STATE_PREFS = "expo.beacon.carplay_js_state"
-internal const val CARPLAY_JS_STATE_KEY = "js_connected"
 internal const val API_CONFIG_PREFS = "expo.beacon.api_config"
 
 /** Foreground-service scan window for background monitoring responsiveness. */

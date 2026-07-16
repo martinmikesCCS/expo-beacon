@@ -1,14 +1,18 @@
 {
   "name": "expo-beacon",
-  "version": "0.10.3",
+  "version": "0.10.8",
   "description": "Expo module for scanning, pairing, and monitoring iBeacons on Android and iOS",
-  "main": "build/index.js",
+  "main": "build/cjs/index.js",
+  "module": "build/index.js",
+  "react-native": "build/index.js",
   "types": "build/index.d.ts",
   "exports": {
     ".": {
+      "types": "./build/index.d.ts",
+      "react-native": "./build/index.js",
       "import": "./build/index.js",
-      "require": "./build/index.js",
-      "types": "./build/index.d.ts"
+      "require": "./build/cjs/index.js",
+      "default": "./build/index.js"
     },
     "./app.plugin": "./app.plugin.js",
     "./app.plugin.js": "./app.plugin.js"
@@ -21,16 +25,19 @@
     "android/src/",
     "android/build.gradle",
     "expo-module.config.json",
-    "src/"
+    "src/",
+    "!src/__tests__/"
   ],
   "scripts": {
-    "build": "expo-module build",
+    "build": "expo-module build && npm run build:cjs && npm run build:package-metadata",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:package-metadata": "node scripts/write-build-package-metadata.cjs",
     "build:plugin": "tsc -p plugin/tsconfig.json",
     "clean": "expo-module clean",
     "lint": "expo-module lint",
     "test": "expo-module test",
-    "prepare": "expo-module prepare && npm run build:plugin",
-    "prepublishOnly": "expo-module prepublishOnly && npm run build:plugin",
+    "prepare": "expo-module prepare && npm run build:cjs && npm run build:package-metadata && npm run build:plugin",
+    "prepublishOnly": "expo-module prepublishOnly && npm run build:cjs && npm run build:package-metadata && npm run build:plugin",
     "expo-module": "expo-module",
     "open:ios": "xed example/ios",
     "open:android": "open -a \"Android Studio\" example/android"
@@ -58,11 +65,21 @@
   "license": "MIT",
   "homepage": "https://github.com/martinmikesCCS/expo-beacon#readme",
   "devDependencies": {
+    "@babel/preset-env": "^7.29.2",
+    "@babel/preset-typescript": "^7.28.5",
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^25.0.0",
     "@types/react": "~19.1.1",
+    "babel-jest": "^29.7.0",
+    "eslint": "^9.39.4",
+    "eslint-config-universe": "^15.0.3",
+    "eslint-plugin-n": "^17.24.0",
     "expo": "~55.0.8",
     "expo-module-scripts": "^55.0.2",
     "react": "19.2.0",
-    "react-native": "0.83.2"
+    "react-native": "0.83.2",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@expo/config-plugins": "*",

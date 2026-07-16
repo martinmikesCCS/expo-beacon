@@ -17,9 +17,4 @@ interface BeaconEventPlugin {
     fun onEddystoneExit(identifier: String, namespace: String, instance: String, distance: Double)
     fun onEddystoneTimeout(identifier: String, namespace: String, instance: String, distance: Double)
 
-    // CarPlay / Android Auto
-    /** Called when the device connects to an Android Auto session. Default no-op. */
-    fun onCarPlayConnected(transport: String) {}
-    /** Called when the device disconnects from an Android Auto session. Default no-op. */
-    fun onCarPlayDisconnected() {}
 }

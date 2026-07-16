@@ -3,14 +3,16 @@ plugins {
   id 'expo-module-gradle-plugin'
 }
 
+def expoBeaconPackage = new groovy.json.JsonSlurper().parse(file('../package.json'))
+
 group = 'expo.modules.beacon'
-version = '0.1.0'
+version = expoBeaconPackage.version
 
 android {
   namespace "expo.modules.beacon"
   defaultConfig {
     versionCode 1
-    versionName "0.1.0"
+    versionName expoBeaconPackage.version
     minSdkVersion 23
   }
   lint {
@@ -20,13 +22,4 @@ android {
 
 dependencies {
   implementation 'org.altbeacon:android-beacon-library:2.21.2'
-  // androidx.car.app provides CarConnection LiveData for detecting Android Auto sessions.
-  // No Android Auto certification or extra permissions required for read-only state.
-  // 1.7.0 fixes known wireless-AA + Android 14 issues that existed in 1.4.0/1.5.x.
-  implementation 'androidx.car.app:app:1.7.0'
-  // WorkManager powers the CarPlay watchdog (periodic restart of the foreground
-  // service if it was killed by the OS / OEM cleaners while CarPlay observation
-  // is enabled). Minimum periodic interval is 15 min; an AlarmManager loop in
-  // BootReceiver covers the sub-15-min gap.
-  implementation 'androidx.work:work-runtime-ktx:2.9.1'
 }

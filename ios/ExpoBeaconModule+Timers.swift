@@ -32,14 +32,10 @@ extension ExpoBeaconModule {
     private func rescheduleInactivity(
         identifier: String,
         timers: ReferenceWritableKeyPath<ExpoBeaconModule, [String: DispatchWorkItem]>,
-        timeoutTimers: ReferenceWritableKeyPath<ExpoBeaconModule, [String: DispatchWorkItem]>,
         pairedList: [[String: Any]],
         onFire: @escaping (ExpoBeaconModule) -> Void
     ) {
         self[keyPath: timers].removeValue(forKey: identifier)?.cancel()
-        // A fresh valid BLE reading means the beacon is present; discard any
-        // already-armed timeout so it cannot fire while the device is in range.
-        self[keyPath: timeoutTimers].removeValue(forKey: identifier)?.cancel()
 
         let paired = pairedList.first { ($0["identifier"] as? String) == identifier }
         guard let seconds = paired?["timeoutSeconds"] as? Int, seconds > 0 else { return }
@@ -107,7 +103,6 @@ extension ExpoBeaconModule {
         rescheduleInactivity(
             identifier: identifier,
             timers: \.beaconInactivityTimers,
-            timeoutTimers: \.beaconTimeoutTimers,
             pairedList: loadPairedBeaconsRaw()
         ) { module in
             module.scheduleBeaconTimeout(identifier: identifier, beacon: beacon, region: region)
@@ -118,7 +113,6 @@ extension ExpoBeaconModule {
         rescheduleInactivity(
             identifier: identifier,
             timers: \.eddystoneInactivityTimers,
-            timeoutTimers: \.eddystoneTimeoutTimers,
             pairedList: loadPairedEddystonesRaw()
         ) { module in
             module.scheduleEddystoneTimeout(identifier: identifier, namespace: namespace, instance: instance)

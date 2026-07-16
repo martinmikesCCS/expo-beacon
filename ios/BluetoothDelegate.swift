@@ -10,18 +10,22 @@ internal final class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard let module, !module.isModuleDestroyed else { return }
         switch central.state {
         case .poweredOn:
-            module?.ensureBleScanRunning()
+            module.handleBluetoothPoweredOn()
         case .unauthorized:
             print("[ExpoBeacon] Bluetooth authorization denied — Eddystone scanning/monitoring unavailable. " +
                   "Ensure NSBluetoothAlwaysUsageDescription is set in Info.plist.")
-            module?.handleBluetoothStateError(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth authorization denied — Eddystone scanning/monitoring unavailable")
-            module?.failEddystoneScan(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth permission denied")
+            module.handleBluetoothStateError(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth authorization denied — Eddystone scanning/monitoring unavailable")
+            module.failEddystoneScan(code: "BLUETOOTH_UNAUTHORIZED", message: "Bluetooth permission denied")
         case .poweredOff:
             print("[ExpoBeacon] Bluetooth is powered off — Eddystone scanning/monitoring unavailable.")
-            module?.handleBluetoothStateError(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off — Eddystone scanning/monitoring unavailable")
-            module?.failEddystoneScan(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off")
+            module.handleBluetoothStateError(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off — Eddystone scanning/monitoring unavailable")
+            module.failEddystoneScan(code: "BLUETOOTH_OFF", message: "Bluetooth is powered off")
+        case .unsupported:
+            module.handleBluetoothStateError(code: "BLUETOOTH_UNSUPPORTED", message: "Bluetooth LE is not supported on this device")
+            module.failEddystoneScan(code: "BLUETOOTH_UNSUPPORTED", message: "Bluetooth LE is not supported on this device")
         default:
             break
         }
@@ -31,7 +35,8 @@ internal final class BluetoothDelegate: NSObject, CBCentralManagerDelegate {
                          didDiscover peripheral: CBPeripheral,
                          advertisementData: [String: Any],
                          rssi RSSI: NSNumber) {
-        module?.handleEddystoneDiscovery(advertisementData: advertisementData, rssi: RSSI)
+        guard let module, !module.isModuleDestroyed else { return }
+        module.handleEddystoneDiscovery(advertisementData: advertisementData, rssi: RSSI)
     }
 
     func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {

@@ -1,5 +1,6 @@
 package expo.modules.beacon
 
+import android.util.Log
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -14,7 +15,7 @@ object BeaconPluginRegistry {
     private val plugins = CopyOnWriteArrayList<BeaconEventPlugin>()
 
     fun register(plugin: BeaconEventPlugin) {
-        plugins.add(plugin)
+        plugins.addIfAbsent(plugin)
     }
 
     fun unregister(plugin: BeaconEventPlugin) {
@@ -31,7 +32,7 @@ object BeaconPluginRegistry {
         instance: String,
         distance: Double,
     ) {
-        plugins.forEach { plugin ->
+        dispatch("enter") { plugin ->
             if (isEddystone) {
                 plugin.onEddystoneEnter(identifier, namespace, instance, distance)
             } else {
@@ -50,7 +51,7 @@ object BeaconPluginRegistry {
         instance: String,
         distance: Double,
     ) {
-        plugins.forEach { plugin ->
+        dispatch("exit") { plugin ->
             if (isEddystone) {
                 plugin.onEddystoneExit(identifier, namespace, instance, distance)
             } else {
@@ -69,7 +70,7 @@ object BeaconPluginRegistry {
         instance: String,
         distance: Double,
     ) {
-        plugins.forEach { plugin ->
+        dispatch("timeout") { plugin ->
             if (isEddystone) {
                 plugin.onEddystoneTimeout(identifier, namespace, instance, distance)
             } else {
@@ -78,11 +79,17 @@ object BeaconPluginRegistry {
         }
     }
 
-    internal fun dispatchCarPlayConnected(transport: String) {
-        plugins.forEach { it.onCarPlayConnected(transport) }
-    }
-
-    internal fun dispatchCarPlayDisconnected() {
-        plugins.forEach { it.onCarPlayDisconnected() }
+    private inline fun dispatch(event: String, callback: (BeaconEventPlugin) -> Unit) {
+        plugins.forEach { plugin ->
+            try {
+                callback(plugin)
+            } catch (error: Throwable) {
+                Log.e(
+                    TAG,
+                    "Beacon plugin ${plugin.javaClass.name} failed while handling $event",
+                    error
+                )
+            }
+        }
     }
 }
