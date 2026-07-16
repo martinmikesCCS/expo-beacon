@@ -1,24 +1,22 @@
 # expo-beacon
 
-> CarPlay and Android Auto support has moved to [`expo-detect-carplay`](https://github.com/Mike89745/expo-detect-carplay). This package now contains beacon features only.
-
 An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddystone** beacons in React Native apps — with full background support on both iOS and Android.
 
-| Feature | Description |
-|---|---|
-| **Scan** | Discover nearby iBeacons (one-shot or continuous) and Eddystone-UID / Eddystone-URL beacons via BLE |
-| **Pair** | Register specific beacons for persistent tracking — survives app restarts |
-| **Monitor** | Background enter/exit region detection with distance-based filtering |
-| **Distance** | Real-time distance updates (~1/sec) while monitoring |
-| **Timeout** | Fire a one-shot event after a beacon has been out of range for a configured duration |
-| **Event Logging** | Persist beacon and native error events to a bounded local SQLite database |
-| **Notifications** | Automatic local notifications on region enter/exit, fully customisable |
+| Feature                 | Description                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **Scan**          | Discover nearby iBeacons (one-shot or continuous) and Eddystone-UID / Eddystone-URL beacons via BLE |
+| **Pair**          | Register specific beacons for persistent tracking — survives app restarts                          |
+| **Monitor**       | Background enter/exit region detection with distance-based filtering                                |
+| **Distance**      | Real-time distance updates (~1/sec) while monitoring                                                |
+| **Timeout**       | Fire a one-shot event after a beacon has been out of range for a configured duration                |
+| **Event Logging** | Persist beacon and native error events to a bounded local SQLite database                           |
+| **Notifications** | Automatic local notifications on region enter/exit, fully customisable                              |
 
-| Platform | Native Implementation |
-|---|---|
-| **Android** | [AltBeacon](https://altbeacon.github.io/android-beacon-library/) library + Foreground Service |
-| **iOS** | CoreLocation (iBeacon ranging & monitoring) + CoreBluetooth (Eddystone & wildcard BLE) |
-| **Web** | Not supported (async methods reject, sync getters return inert defaults, everything else throws) |
+| Platform          | Native Implementation                                                                            |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| **Android** | [AltBeacon](https://altbeacon.github.io/android-beacon-library/) library + Foreground Service     |
+| **iOS**     | CoreLocation (iBeacon ranging & monitoring) + CoreBluetooth (Eddystone & wildcard BLE)           |
+| **Web**     | Not supported (async methods reject, sync getters return inert defaults, everything else throws) |
 
 ---
 
@@ -36,7 +34,7 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [Scanning for iBeacons](#scanning-for-ibeacons)
   - [Scanning for Eddystone Beacons](#scanning-for-eddystone-beacons)
   - [Continuous (Live) Scanning](#continuous-live-scanning)
-  - [Pairing & Unpairing Beacons](#pairing--unpairing-beacons)
+  - [Pairing &amp; Unpairing Beacons](#pairing--unpairing-beacons)
   - [Background Monitoring](#background-monitoring)
   - [Customizing Notifications](#customizing-notifications)
   - [Beacon Timeout](#beacon-timeout)
@@ -73,7 +71,7 @@ An Expo module for scanning, pairing, and monitoring **iBeacons** and **Eddyston
   - [react-native-background-geolocation](#react-native-background-geolocation)
 - [Background Behaviour](#background-behaviour)
 - [Notifications](#notifications)
-- [Platform-Specific Notes & Gotchas](#platform-specific-notes--gotchas)
+- [Platform-Specific Notes &amp; Gotchas](#platform-specific-notes--gotchas)
 - [Troubleshooting](#troubleshooting)
 - [Error Codes](#error-codes)
 - [Contributing](#contributing)
@@ -162,13 +160,13 @@ The plugin is active with just `"plugins": ["expo-beacon"]`. Use the object form
 }
 ```
 
-| Option | Default | Effect |
-|---|---|---|
-| `ios.locationWhenInUsePermission` | Existing host value, otherwise a built-in description | Overrides `NSLocationWhenInUseUsageDescription`. |
-| `ios.locationAlwaysPermission` | Existing host value, otherwise a built-in description | Overrides `NSLocationAlwaysAndWhenInUseUsageDescription`. |
-| `ios.bluetoothPermission` | Existing host value, otherwise a built-in description | Overrides `NSBluetoothAlwaysUsageDescription`. |
-| `ios.backgroundGeolocation` | `false` | Generates and registers the native `react-native-background-geolocation` bridge. Requires that package to be installed and configured. |
-| `android.backgroundGeolocation` | `false` | Generates and registers the native `react-native-background-geolocation` bridge. Requires that package to be installed and configured. |
+| Option                              | Default                                               | Effect                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ios.locationWhenInUsePermission` | Existing host value, otherwise a built-in description | Overrides`NSLocationWhenInUseUsageDescription`.                                                                                       |
+| `ios.locationAlwaysPermission`    | Existing host value, otherwise a built-in description | Overrides`NSLocationAlwaysAndWhenInUseUsageDescription`.                                                                              |
+| `ios.bluetoothPermission`         | Existing host value, otherwise a built-in description | Overrides`NSBluetoothAlwaysUsageDescription`.                                                                                         |
+| `ios.backgroundGeolocation`       | `false`                                             | Generates and registers the native`react-native-background-geolocation` bridge. Requires that package to be installed and configured. |
+| `android.backgroundGeolocation`   | `false`                                             | Generates and registers the native`react-native-background-geolocation` bridge. Requires that package to be installed and configured. |
 
 When no host value or explicit override exists, the iOS prompt defaults are:
 
@@ -300,28 +298,28 @@ function BeaconScreen() {
 }
 ```
 
-| Returned value | Description |
-| --- | --- |
-| `pairedBeacons` / `pairedEddystones` | Reactive lists of paired devices. |
-| `inRange` | Paired beacons currently in range, derived live from enter/exit/distance/timeout events (`InRangeBeacon[]`). |
-| `isMonitoring` | Whether background monitoring is active. |
-| `isEventLoggingEnabled` | Whether SQLite event logging is enabled (kept in sync by the logging actions). |
-| `refreshPaired()` | Re-read the paired lists from native. |
-| `pairBeacon()` / `unpairBeacon()` | Pair / unpair an iBeacon, then refresh. |
-| `pairEddystone()` / `unpairEddystone()` | Pair / unpair an Eddystone, then refresh. |
-| `scanForBeacons()` / `scanForEddystones()` | One-shot scans returning a promise. |
-| `startContinuousScan()` / `stopContinuousScan()` | Live scan; results arrive via `onBeaconFound` / `onEddystoneFound`. |
-| `cancelScan()` | Cancel an in-progress one-shot scan. |
-| `startMonitoring()` / `stopMonitoring()` | Start / stop background monitoring. |
-| `getMonitoringConfig()` | Read the current monitoring config + active-state snapshot. |
-| `getMonitoredDeviceState()` / `getMonitoredDeviceStates()` | Native state snapshot for one / all paired devices. |
-| `setNotificationConfig()` | Persist notification configuration for monitoring sessions. |
-| `setBeaconNotificationConfig()` | Persist only beacon notification settings. |
-| `enableEventLogging()` / `disableEventLogging()` | Toggle SQLite logging (updates `isEventLoggingEnabled`). |
-| `getEventLogs()` / `clearEventLogs()` / `destroyEventLogs()` | Read / clear / drop the persisted event log. |
-| `setApiEndpoint()` / `getApiEndpoint()` | Configure / read the native event-forwarding endpoint. |
-| `isBatteryOptimizationExempt()` / `requestBatteryOptimizationExemption()` | Check / request Android battery-optimization exemption. |
-| `requestPermissions()` | Request the permissions needed for scanning / monitoring. |
+| Returned value                                                                | Description                                                                                                    |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `pairedBeacons` / `pairedEddystones`                                      | Reactive lists of paired devices.                                                                              |
+| `inRange`                                                                   | Paired beacons currently in range, derived live from enter/exit/distance/timeout events (`InRangeBeacon[]`). |
+| `isMonitoring`                                                              | Whether background monitoring is active.                                                                       |
+| `isEventLoggingEnabled`                                                     | Whether SQLite event logging is enabled (kept in sync by the logging actions).                                 |
+| `refreshPaired()`                                                           | Re-read the paired lists from native.                                                                          |
+| `pairBeacon()` / `unpairBeacon()`                                         | Pair / unpair an iBeacon, then refresh.                                                                        |
+| `pairEddystone()` / `unpairEddystone()`                                   | Pair / unpair an Eddystone, then refresh.                                                                      |
+| `scanForBeacons()` / `scanForEddystones()`                                | One-shot scans returning a promise.                                                                            |
+| `startContinuousScan()` / `stopContinuousScan()`                          | Live scan; results arrive via`onBeaconFound` / `onEddystoneFound`.                                         |
+| `cancelScan()`                                                              | Cancel an in-progress one-shot scan.                                                                           |
+| `startMonitoring()` / `stopMonitoring()`                                  | Start / stop background monitoring.                                                                            |
+| `getMonitoringConfig()`                                                     | Read the current monitoring config + active-state snapshot.                                                    |
+| `getMonitoredDeviceState()` / `getMonitoredDeviceStates()`                | Native state snapshot for one / all paired devices.                                                            |
+| `setNotificationConfig()`                                                   | Persist notification configuration for monitoring sessions.                                                    |
+| `setBeaconNotificationConfig()`                                             | Persist only beacon notification settings.                                                                     |
+| `enableEventLogging()` / `disableEventLogging()`                          | Toggle SQLite logging (updates`isEventLoggingEnabled`).                                                      |
+| `getEventLogs()` / `clearEventLogs()` / `destroyEventLogs()`            | Read / clear / drop the persisted event log.                                                                   |
+| `setApiEndpoint()` / `getApiEndpoint()`                                   | Configure / read the native event-forwarding endpoint.                                                         |
+| `isBatteryOptimizationExempt()` / `requestBatteryOptimizationExemption()` | Check / request Android battery-optimization exemption.                                                        |
+| `requestPermissions()`                                                      | Request the permissions needed for scanning / monitoring.                                                      |
 
 `inRange` reflects **monitored (paired)** beacons only. Continuous-scan results
 are delivered through the `onBeaconFound` / `onEddystoneFound` callbacks because
@@ -840,10 +838,10 @@ requestPermissionsAsync(): Promise<boolean>
 
 Requests all permissions required for scanning and monitoring.
 
-| Platform | Permissions Requested |
-|---|---|
+| Platform          | Permissions Requested                                                                                                                                                                                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Android** | `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` (API 31+), `POST_NOTIFICATIONS` (API 33+), then `ACCESS_BACKGROUND_LOCATION` (API 29+) in a second prompt. Resolves `true` only when background location is granted. |
-| **iOS** | `CLLocationManager` "When In Use" authorization — resolves `true` once granted. The "Always" upgrade is requested later by `startMonitoring()`, and Bluetooth permission is not prompted here. |
+| **iOS**     | `CLLocationManager` "When In Use" authorization — resolves `true` once granted. The "Always" upgrade is requested later by `startMonitoring()`, and Bluetooth permission is not prompted here.                                                                       |
 
 **Returns**: `true` if all required permissions were granted.
 
@@ -868,28 +866,28 @@ Performs a **one-shot iBeacon scan**. Waits for the specified duration, then res
 
 Both parameters are optional — the defaults are applied on the JS side before the native call.
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `uuids` | `string[]` | `[]` | Proximity UUIDs to filter by. See platform differences below. |
-| `scanDurationMs` | `number` | `5000` | Scan duration in milliseconds (must be > 0). |
+| Parameter          | Type         | Default  | Description                                                   |
+| ------------------ | ------------ | -------- | ------------------------------------------------------------- |
+| `uuids`          | `string[]` | `[]`   | Proximity UUIDs to filter by. See platform differences below. |
+| `scanDurationMs` | `number`   | `5000` | Scan duration in milliseconds (must be > 0).                  |
 
 **Returns**: `BeaconScanResult[]` — deduplicated by UUID + major + minor.
 
-| Behaviour | Android | iOS |
-|---|---|---|
-| Empty `uuids` (`[]`) | Wildcard — discovers all nearby iBeacons | Auto-uses paired beacon UUIDs. Rejects with `WILDCARD_NOT_SUPPORTED` if none are paired. |
-| Targeted (`["UUID-1"]`) | Filters scan results to matching UUIDs | CoreLocation ranging for those UUIDs |
+| Behaviour                 | Android                                   | iOS                                                                                       |
+| ------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Empty`uuids` (`[]`)   | Wildcard — discovers all nearby iBeacons | Auto-uses paired beacon UUIDs. Rejects with`WILDCARD_NOT_SUPPORTED` if none are paired. |
+| Targeted (`["UUID-1"]`) | Filters scan results to matching UUIDs    | CoreLocation ranging for those UUIDs                                                      |
 
 **Possible errors**:
 
-| Code | Reason |
-|---|---|
-| `SCAN_IN_PROGRESS` | Another iBeacon scan is already running |
-| `INVALID_UUID` | One of the UUID strings is malformed |
-| `INVALID_DURATION` | Duration ≤ 0 |
-| `PERMISSION_DENIED` | Location permission not granted |
+| Code                       | Reason                                  |
+| -------------------------- | --------------------------------------- |
+| `SCAN_IN_PROGRESS`       | Another iBeacon scan is already running |
+| `INVALID_UUID`           | One of the UUID strings is malformed    |
+| `INVALID_DURATION`       | Duration ≤ 0                           |
+| `PERMISSION_DENIED`      | Location permission not granted         |
 | `WILDCARD_NOT_SUPPORTED` | iOS: empty UUIDs with no paired beacons |
-| `SCAN_CANCELLED` | `cancelScan()` was called |
+| `SCAN_CANCELLED`         | `cancelScan()` was called             |
 
 ```ts
 const beacons = await ExpoBeacon.scanForBeaconsAsync(
@@ -912,19 +910,19 @@ Performs a **one-shot Eddystone scan** using BLE. Discovers both Eddystone-UID a
 
 The parameter is optional — the default is applied on the JS side before the native call.
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
+| Parameter          | Type       | Default  | Description                                  |
+| ------------------ | ---------- | -------- | -------------------------------------------- |
 | `scanDurationMs` | `number` | `5000` | Scan duration in milliseconds (must be > 0). |
 
 **Returns**: `EddystoneScanResult[]` — deduplicated by namespace:instance (UID) or url (URL).
 
 **Possible errors**:
 
-| Code | Reason |
-|---|---|
+| Code                 | Reason                                    |
+| -------------------- | ----------------------------------------- |
 | `SCAN_IN_PROGRESS` | Another Eddystone scan is already running |
-| `INVALID_DURATION` | Duration ≤ 0 |
-| `SCAN_CANCELLED` | `cancelScan()` was called |
+| `INVALID_DURATION` | Duration ≤ 0                             |
+| `SCAN_CANCELLED`   | `cancelScan()` was called               |
 
 ```ts
 const eddystones = await ExpoBeacon.scanForEddystonesAsync(5000);
@@ -939,6 +937,7 @@ startContinuousScan(): void
 ```
 
 Begins a **continuous BLE scan** that streams beacon discoveries via events:
+
 - `onBeaconFound` — iBeacon advertisements
 - `onEddystoneFound` — Eddystone advertisements
 
@@ -976,14 +975,14 @@ pairBeacon(identifier: string, uuid: string, major: number, minor: number, name?
 
 Registers an iBeacon for persistent monitoring.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `identifier` | `string` | Non-empty label unique across beacon types (e.g. `"lobby-entrance"`). Re-using an iBeacon identifier replaces the previous entry. |
-| `uuid` | `string` | iBeacon proximity UUID (case-insensitive, e.g. `"E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"`) |
-| `major` | `number` | Major value: `0`–`65535` |
-| `minor` | `number` | Minor value: `0`–`65535` |
-| `name` | `string?` | Optional BLE device name for display purposes |
-| `timeoutSeconds` | `number?` | Fire `onBeaconTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first. |
+| Parameter          | Type        | Description                                                                                                                        |
+| ------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `identifier`     | `string`  | Non-empty label unique across beacon types (e.g.`"lobby-entrance"`). Re-using an iBeacon identifier replaces the previous entry. |
+| `uuid`           | `string`  | iBeacon proximity UUID (case-insensitive, e.g.`"E2C56DB5-DFFB-48D2-B060-D0F5A71096E0"`)                                          |
+| `major`          | `number`  | Major value:`0`–`65535`                                                                                                       |
+| `minor`          | `number`  | Minor value:`0`–`65535`                                                                                                       |
+| `name`           | `string?` | Optional BLE device name for display purposes                                                                                      |
+| `timeoutSeconds` | `number?` | Fire`onBeaconTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first.         |
 
 **Possible errors**: `INVALID_IDENTIFIER`, `INVALID_UUID`, `INVALID_MAJOR`, `INVALID_MINOR`, `INVALID_TIMEOUT`, `DUPLICATE_IDENTIFIER` (identifier already used by a paired Eddystone), or `DUPLICATE_BEACON_IDENTITY` (the same UUID + major + minor is paired under another identifier).
 
@@ -1004,8 +1003,8 @@ unpairBeacon(identifier: string): void
 
 Removes a paired iBeacon. If monitoring is active, the region stops being tracked immediately.
 
-| Parameter | Type | Description |
-|---|---|---|
+| Parameter      | Type       | Description                 |
+| -------------- | ---------- | --------------------------- |
 | `identifier` | `string` | The label used when pairing |
 
 ```ts
@@ -1037,13 +1036,13 @@ pairEddystone(identifier: string, namespace: string, instance: string, name?: st
 
 Registers an Eddystone-UID beacon for persistent monitoring. The namespace and instance are normalized to lowercase before storage.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `identifier` | `string` | Non-empty label unique across beacon types (e.g. `"meeting-room"`). Re-using an Eddystone identifier replaces the previous entry. |
-| `namespace` | `string` | 10-byte namespace ID as hex string — must be exactly **20 hex characters** |
-| `instance` | `string` | 6-byte instance ID as hex string — must be exactly **12 hex characters** |
-| `name` | `string?` | Optional BLE device name for display purposes |
-| `timeoutSeconds` | `number?` | Fire `onEddystoneTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first. |
+| Parameter          | Type        | Description                                                                                                                        |
+| ------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `identifier`     | `string`  | Non-empty label unique across beacon types (e.g.`"meeting-room"`). Re-using an Eddystone identifier replaces the previous entry. |
+| `namespace`      | `string`  | 10-byte namespace ID as hex string — must be exactly**20 hex characters**                                                   |
+| `instance`       | `string`  | 6-byte instance ID as hex string — must be exactly**12 hex characters**                                                     |
+| `name`           | `string?` | Optional BLE device name for display purposes                                                                                      |
+| `timeoutSeconds` | `number?` | Fire`onEddystoneTimeout` once, this many seconds after the beacon exits range. Cancelled if the beacon is seen again first.      |
 
 **Possible errors**: `INVALID_IDENTIFIER`, `INVALID_NAMESPACE`, `INVALID_INSTANCE`, `INVALID_TIMEOUT`, `DUPLICATE_IDENTIFIER` (identifier already used by a paired iBeacon), or `DUPLICATE_EDDYSTONE_IDENTITY` (the same namespace + instance is paired under another identifier).
 
@@ -1064,8 +1063,8 @@ unpairEddystone(identifier: string): void
 
 Removes a paired Eddystone beacon.
 
-| Parameter | Type | Description |
-|---|---|---|
+| Parameter      | Type       | Description                 |
+| -------------- | ---------- | --------------------------- |
 | `identifier` | `string` | The label used when pairing |
 
 ```ts
@@ -1099,21 +1098,21 @@ Starts background region monitoring for **all paired beacons** (iBeacon + Eddyst
 
 Accepts a `MonitoringOptions` object, a plain `number` (shorthand for `maxDistance`), or nothing.
 
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `maxDistance` | `number` | `undefined` | Distance threshold in metres. `onBeaconEnter` / `onEddystoneEnter` only fires when measured distance ≤ this value. `onBeaconExit` / `onEddystoneExit` always fires. Omit to disable filtering. |
-| `exitDistance` | `number` | `maxDistance + min(maxDistance × 0.5, 2.5)` | Distance in metres at which exit events fire. Must be ≥ `maxDistance`. Creates a hysteresis band between enter and exit thresholds to prevent rapid toggling near the boundary. Only used when `maxDistance` is set. |
-| `minRssi` | `number` | `-85` | Minimum RSSI in dBm accepted for monitoring readings. One-shot scan results are not filtered. |
-| `level` | `"all" \| "events"` | `"all"` | `"events"` suppresses distance emission, logging, and API forwarding while retaining enter, exit, and timeout events. |
-| `exitTimeoutSeconds` | `number` | `300` | Seconds without a valid sighting before a disappeared beacon emits an exit. Must be greater than 0. |
-| `notifications` | `NotificationConfig` | `undefined` | Notification overrides for this session (persisted). |
+| Property               | Type                   | Default                                        | Description                                                                                                                                                                                                              |
+| ---------------------- | ---------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxDistance`        | `number`             | `undefined`                                  | Distance threshold in metres.`onBeaconEnter` / `onEddystoneEnter` only fires when measured distance ≤ this value. `onBeaconExit` / `onEddystoneExit` always fires. Omit to disable filtering.                   |
+| `exitDistance`       | `number`             | `maxDistance + min(maxDistance × 0.5, 2.5)` | Distance in metres at which exit events fire. Must be ≥`maxDistance`. Creates a hysteresis band between enter and exit thresholds to prevent rapid toggling near the boundary. Only used when `maxDistance` is set. |
+| `minRssi`            | `number`             | `-85`                                        | Minimum RSSI in dBm accepted for monitoring readings. One-shot scan results are not filtered.                                                                                                                            |
+| `level`              | `"all" \| "events"`   | `"all"`                                      | `"events"` suppresses distance emission, logging, and API forwarding while retaining enter, exit, and timeout events.                                                                                                  |
+| `exitTimeoutSeconds` | `number`             | `300`                                        | Seconds without a valid sighting before a disappeared beacon emits an exit. Must be greater than 0.                                                                                                                      |
+| `notifications`      | `NotificationConfig` | `undefined`                                  | Notification overrides for this session (persisted).                                                                                                                                                                     |
 
 **What happens on each platform**:
 
-| Platform | Mechanism |
-|---|---|
-| **Android** | Starts `BeaconForegroundService` (persistent notification). Survives app backgrounding. Auto-restarts after device reboot via `BootReceiver`. Scan timing: 1.1 s every 5 s. |
-| **iOS** | Activates `CLLocationManager` region monitoring (iBeacon) + CoreBluetooth BLE scanning (Eddystone). Region events can wake or relaunch an app terminated by the system; a user force-quit prevents this until the app is opened again. |
+| Platform          | Mechanism                                                                                                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Android** | Starts`BeaconForegroundService` (persistent notification). Survives app backgrounding. Auto-restarts after device reboot via `BootReceiver`. Scan timing: 1.1 s every 5 s.                                                          |
+| **iOS**     | Activates`CLLocationManager` region monitoring (iBeacon) + CoreBluetooth BLE scanning (Eddystone). Region events can wake or relaunch an app terminated by the system; a user force-quit prevents this until the app is opened again. |
 
 **Possible errors**: `NO_PAIRED_BEACONS`, `PERMISSION_DENIED`, `INVALID_MAX_DISTANCE`, `INVALID_EXIT_DISTANCE`, and `INVALID_EXIT_TIMEOUT`. On iOS, an Eddystone-only configuration can start without Core Location authorization; iBeacon monitoring requests the Always upgrade for background use.
 
@@ -1286,11 +1285,11 @@ getEventLogs(options?: EventLogQueryOptions): EventLogEntry[]
 
 Retrieves logged events from the SQLite database, newest first.
 
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `limit` | `number` | `1000` | Max rows to return (capped at 10 000) |
-| `eventType` | `string` | `undefined` | Filter by event name (e.g. `"onBeaconEnter"`) |
-| `sinceTimestamp` | `number` | `undefined` | Only events with `timestamp >= value` (ms since epoch) |
+| Property           | Type       | Default       | Description                                             |
+| ------------------ | ---------- | ------------- | ------------------------------------------------------- |
+| `limit`          | `number` | `1000`      | Max rows to return (capped at 10 000)                   |
+| `eventType`      | `string` | `undefined` | Filter by event name (e.g.`"onBeaconEnter"`)          |
+| `sinceTimestamp` | `number` | `undefined` | Only events with`timestamp >= value` (ms since epoch) |
 
 **Returns**: `EventLogEntry[]`
 
@@ -1336,11 +1335,11 @@ setApiEndpoint(url: string, apiKey?: string, id?: string): void
 
 Configures a remote endpoint to which native code POSTs beacon events. Module-level native errors use the same forwarder. Forwarding does not require the JS bridge to be active, and the configuration persists until changed. Delivery is asynchronous and best-effort rather than guaranteed.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `url` | `string` | The API endpoint URL to POST events to. |
-| `apiKey` | `string?` | Sent as the `X-CSFR-Token` header (sic — the header is literally `X-CSFR-Token`, not `X-CSRF-Token`). |
-| `id` | `string?` | Identifier appended to every forwarded event payload. |
+| Parameter  | Type        | Description                                                                                                 |
+| ---------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `url`    | `string`  | The API endpoint URL to POST events to.                                                                     |
+| `apiKey` | `string?` | Sent as the`X-CSFR-Token` header (sic — the header is literally `X-CSFR-Token`, not `X-CSRF-Token`). |
+| `id`     | `string?` | Identifier appended to every forwarded event payload.                                                       |
 
 Use `getApiEndpoint()` to read back the current configuration (each field is `null` if unset).
 
@@ -1372,19 +1371,19 @@ sub.remove();
 
 ### Event Summary
 
-| Event | Trigger | Payload Type |
-|---|---|---|
-| `onBeaconEnter` | Paired iBeacon enters range (respects `maxDistance`) | `BeaconRegionEvent` |
-| `onBeaconExit` | Paired iBeacon leaves range (always fires) | `BeaconRegionEvent` |
-| `onBeaconDistance` | Periodic distance update during monitoring (~1/sec) | `BeaconDistanceEvent` |
-| `onBeaconFound` | iBeacon detected during continuous scan | `BeaconScanResult` |
-| `onEddystoneFound` | Eddystone detected during continuous scan | `EddystoneScanResult` |
-| `onEddystoneEnter` | Paired Eddystone enters range (respects `maxDistance`) | `EddystoneRegionEvent` |
-| `onEddystoneExit` | Paired Eddystone leaves range (always fires) | `EddystoneRegionEvent` |
-| `onEddystoneDistance` | Periodic Eddystone distance update during monitoring | `EddystoneDistanceEvent` |
-| `onBeaconTimeout` | Paired iBeacon out of range for configured `timeoutSeconds` | `BeaconTimeoutEvent` |
-| `onEddystoneTimeout` | Paired Eddystone out of range for configured `timeoutSeconds` | `EddystoneTimeoutEvent` |
-| `onBeaconError` | Native scan, monitoring, Bluetooth, or capacity error | `BeaconErrorEvent` |
+| Event                   | Trigger                                                        | Payload Type               |
+| ----------------------- | -------------------------------------------------------------- | -------------------------- |
+| `onBeaconEnter`       | Paired iBeacon enters range (respects`maxDistance`)          | `BeaconRegionEvent`      |
+| `onBeaconExit`        | Paired iBeacon leaves range (always fires)                     | `BeaconRegionEvent`      |
+| `onBeaconDistance`    | Periodic distance update during monitoring (~1/sec)            | `BeaconDistanceEvent`    |
+| `onBeaconFound`       | iBeacon detected during continuous scan                        | `BeaconScanResult`       |
+| `onEddystoneFound`    | Eddystone detected during continuous scan                      | `EddystoneScanResult`    |
+| `onEddystoneEnter`    | Paired Eddystone enters range (respects`maxDistance`)        | `EddystoneRegionEvent`   |
+| `onEddystoneExit`     | Paired Eddystone leaves range (always fires)                   | `EddystoneRegionEvent`   |
+| `onEddystoneDistance` | Periodic Eddystone distance update during monitoring           | `EddystoneDistanceEvent` |
+| `onBeaconTimeout`     | Paired iBeacon out of range for configured`timeoutSeconds`   | `BeaconTimeoutEvent`     |
+| `onEddystoneTimeout`  | Paired Eddystone out of range for configured`timeoutSeconds` | `EddystoneTimeoutEvent`  |
+| `onBeaconError`       | Native scan, monitoring, Bluetooth, or capacity error          | `BeaconErrorEvent`       |
 
 ### Event Detail
 
@@ -1848,7 +1847,7 @@ This integration starts BGLocation when any monitored beacon becomes active and 
 npx expo install expo-beacon react-native-background-geolocation
 ```
 
-Follow [react-native-background-geolocation's native setup](https://transistorsoft.github.io/react-native-background-geolocation) — it requires extra Gradle / CocoaPods config and a license key.
+Follow [react-native-background-geolocation&#39;s native setup](https://transistorsoft.github.io/react-native-background-geolocation) — it requires extra Gradle / CocoaPods config and a license key.
 
 #### 2. Add the Expo config plugin
 
@@ -1969,24 +1968,24 @@ override fun onCreate() {
 
 `startMonitoring()` launches a **foreground service** (`BeaconForegroundService`) with a persistent notification. This is required by Android 8+ (Oreo) to keep BLE scanning alive in the background.
 
-| Behaviour | Detail |
-|---|---|
-| Foreground service | Required for background BLE on Android 8+. Shows persistent notification. |
-| Reboot survival | `BootReceiver` auto-restarts monitoring after device reboot. |
-| Scan timing | 1.1 s scan window every 5 s (AltBeacon default). |
-| Timeout recovery | Pending per-beacon timeout deadlines are persisted and restored after service/process recreation. Recovery uses inexact alarms and does not require exact-alarm permission. |
-| Battery | Low impact due to duty-cycled scanning. |
+| Behaviour          | Detail                                                                                                                                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Foreground service | Required for background BLE on Android 8+. Shows persistent notification.                                                                                                   |
+| Reboot survival    | `BootReceiver` auto-restarts monitoring after device reboot.                                                                                                              |
+| Scan timing        | 1.1 s scan window every 5 s (AltBeacon default).                                                                                                                            |
+| Timeout recovery   | Pending per-beacon timeout deadlines are persisted and restored after service/process recreation. Recovery uses inexact alarms and does not require exact-alarm permission. |
+| Battery            | Low impact due to duty-cycled scanning.                                                                                                                                     |
 
 ### iOS
 
 `startMonitoring()` activates `CLLocationManager` region monitoring for iBeacons and CoreBluetooth BLE scanning for Eddystones.
 
-| Behaviour | Detail |
-|---|---|
-| Region monitoring | iOS can wake/relaunch the app on region boundaries after system termination. A user force-quit suppresses relaunch until the app is opened again. |
-| BLE scanning | Eddystones are monitored via CoreBluetooth. iOS may throttle and coalesce advertisements in the background, so the module does not infer exits from missing background callbacks; it restarts scanning and waits through a grace window on foreground. |
-| Background modes | `allowsBackgroundLocationUpdates` is only enabled when `UIBackgroundModes` contains `location` (the config plugin adds it on prebuild); `pausesLocationUpdatesAutomatically = false` |
-| Region limit | 20 Core Location regions per app, shared with host-app regions. expo-beacon preserves host regions and uses the remaining capacity; Eddystones don't count. |
+| Behaviour         | Detail                                                                                                                                                                                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Region monitoring | iOS can wake/relaunch the app on region boundaries after system termination. A user force-quit suppresses relaunch until the app is opened again.                                                                                                      |
+| BLE scanning      | Eddystones are monitored via CoreBluetooth. iOS may throttle and coalesce advertisements in the background, so the module does not infer exits from missing background callbacks; it restarts scanning and waits through a grace window on foreground. |
+| Background modes  | `allowsBackgroundLocationUpdates` is only enabled when `UIBackgroundModes` contains `location` (the config plugin adds it on prebuild); `pausesLocationUpdatesAutomatically = false`                                                           |
+| Region limit      | 20 Core Location regions per app, shared with host-app regions. expo-beacon preserves host regions and uses the remaining capacity; Eddystones don't count.                                                                                            |
 
 ---
 
@@ -1996,19 +1995,19 @@ Local notifications are posted automatically for beacon enter/exit/timeout event
 
 ### Default Values
 
-| Property | Default |
-|---|---|
-| Enter title | `"Beacon Entered"` |
-| Exit title | `"Beacon Exited"` |
-| Body | `"{identifier} region {event}ed"` |
-| Sound (iOS) | `true` |
-| Icon (Android) | System `ic_dialog_info` |
-| Foreground service title | `"Beacon Monitoring Active"` |
-| Foreground service text | `"Monitoring for iBeacons in the background"` |
-| Foreground channel name (Android) | `"Beacon Foreground Service"` |
-| Foreground channel importance (Android) | `"low"` (no sound/vibration) |
-| Channel name (Android) | `"Beacon Monitoring"` |
-| Channel importance (Android) | `"low"` |
+| Property                                | Default                                         |
+| --------------------------------------- | ----------------------------------------------- |
+| Enter title                             | `"Beacon Entered"`                            |
+| Exit title                              | `"Beacon Exited"`                             |
+| Body                                    | `"{identifier} region {event}ed"`             |
+| Sound (iOS)                             | `true`                                        |
+| Icon (Android)                          | System`ic_dialog_info`                        |
+| Foreground service title                | `"Beacon Monitoring Active"`                  |
+| Foreground service text                 | `"Monitoring for iBeacons in the background"` |
+| Foreground channel name (Android)       | `"Beacon Foreground Service"`                 |
+| Foreground channel importance (Android) | `"low"` (no sound/vibration)                  |
+| Channel name (Android)                  | `"Beacon Monitoring"`                         |
+| Channel importance (Android)            | `"low"`                                       |
 
 ### Android Channels
 
@@ -2023,27 +2022,18 @@ Foreground-service notifications use their own quiet channel ID, `expo_beacon_fo
 ### iOS Native Insights (CoreLocation + CoreBluetooth)
 
 1. **iBeacon scanning requires UUIDs**: Apple's CoreBluetooth strips iBeacon manufacturer data from BLE advertisements. The module uses `CLLocationManager` ranging with `CLBeaconIdentityConstraint`, which requires known UUIDs. Wildcard iBeacon discovery is architecturally impossible on iOS.
-
 2. **Two-step location permission**: iOS requires requesting "When In Use" first, then upgrading to "Always". `requestPermissionsAsync()` requests (and resolves `true` with) "When In Use"; the "Always" upgrade prompt is triggered by `startMonitoring()`.
-
 3. **20 region limit**: `CLLocationManager` enforces 20 monitored regions per app. Host-app regions consume capacity first; expo-beacon preserves them, namespaces its own identifiers, and emits `REGION_LIMIT_EXCEEDED` for paired iBeacons it cannot register.
-
 4. **Region monitoring vs. ranging**: Region monitoring (enter/exit) works indefinitely in the background. Ranging (distance updates) requires the app to be in the foreground or have an active background task. The module keeps ranging alive when background location mode is enabled.
-
 5. **Eddystone background limitations**: Eddystone monitoring uses CoreBluetooth, which iOS throttles and may coalesce in the background. Missing callbacks are not reliable evidence of exit, so expo-beacon avoids synthetic background exits and reconciles after a foreground grace period. Do not depend on prompt Eddystone exits while suspended.
-
 6. **Hysteresis**: The module requires 3 consecutive readings inside/outside the distance threshold before emitting enter/exit events. This prevents jitter from RSSI fluctuations.
 
 ### Android Native Insights (AltBeacon + Foreground Service)
 
 1. **Foreground service is mandatory**: Android 8+ kills background BLE scans. The module uses `BeaconForegroundService` with a persistent notification. Users will see this notification while monitoring is active.
-
 2. **Doze mode**: Android Doze can delay BLE scan callbacks. The foreground service mitigates this, but very aggressive OEM battery optimization (Xiaomi, Huawei, Samsung) may still interfere. Direct users to disable battery optimization for your app.
-
 3. **Boot receiver**: Monitoring auto-restarts after reboot via `BootReceiver` reading the `is_monitoring` flag from `SharedPreferences`.
-
 4. **Runtime permissions**: Android 12+ requires `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` in addition to location. Android 13+ requires `POST_NOTIFICATIONS` for the foreground service notification. `requestPermissionsAsync()` handles all of these.
-
 5. **Notification channel immutability**: Once Android creates a notification channel with a given importance level, decreasing the importance has no effect. The only workaround is uninstalling and reinstalling the app.
 
 ---
@@ -2053,6 +2043,7 @@ Foreground-service notifications use their own quiet channel ID, `expo_beacon_fo
 ### "WILDCARD_NOT_SUPPORTED" error on iOS
 
 You called `scanForBeaconsAsync([])` with no paired beacons. Either:
+
 - Pass at least one UUID: `scanForBeaconsAsync(["YOUR-UUID"])`
 - Or pair beacons first with `pairBeacon()` — the module will auto-use their UUIDs
 
@@ -2075,6 +2066,7 @@ You called `scanForBeaconsAsync([])` with no paired beacons. Either:
 ### Distance values are inaccurate
 
 BLE distance estimation is inherently imprecise. RSSI fluctuates due to:
+
 - Physical obstacles (walls, furniture, the user's body)
 - Multipath interference
 - Device orientation
@@ -2094,31 +2086,31 @@ The module uses hysteresis (3 consecutive readings) to prevent jitter. If you're
 
 ## Error Codes
 
-| Code | Method / event | Description |
-|---|---|---|
-| `SCAN_IN_PROGRESS` | `scanForBeaconsAsync`, `scanForEddystonesAsync` | A scan of the same type is already running. One iBeacon and one Eddystone scan may coexist. |
-| `SCAN_CANCELLED` | `scanForBeaconsAsync`, `scanForEddystonesAsync` | The scan was cancelled via `cancelScan()`. |
-| `SCAN_ERROR` | Scan methods / `onBeaconError` | The native scanner failed to start or stopped unexpectedly. |
-| `INVALID_UUID` | `scanForBeaconsAsync`, `pairBeacon` | Malformed UUID string. |
-| `INVALID_DURATION` | `scanForBeaconsAsync`, `scanForEddystonesAsync` | Scan duration must be > 0. |
-| `INVALID_IDENTIFIER` | `pairBeacon`, `pairEddystone` | Identifier must not be empty. |
-| `INVALID_MAJOR` | `pairBeacon` | Major value not in range 0–65535. |
-| `INVALID_MINOR` | `pairBeacon` | Minor value not in range 0–65535. |
-| `INVALID_NAMESPACE` | `pairEddystone` | Namespace must be exactly 20 hex characters. |
-| `INVALID_INSTANCE` | `pairEddystone` | Instance must be exactly 12 hex characters. |
-| `INVALID_TIMEOUT` | `pairBeacon`, `pairEddystone` | `timeoutSeconds` must be greater than 0. |
-| `DUPLICATE_IDENTIFIER` | `pairBeacon`, `pairEddystone` | The identifier is already used by a paired beacon of the other type. |
-| `DUPLICATE_BEACON_IDENTITY` | `pairBeacon` | UUID + major + minor is already paired under another identifier. |
-| `DUPLICATE_EDDYSTONE_IDENTITY` | `pairEddystone` | Namespace + instance is already paired under another identifier. |
-| `NO_PAIRED_BEACONS` | `startMonitoring` | Pair at least one iBeacon or Eddystone first. |
-| `INVALID_MAX_DISTANCE` | `startMonitoring` | `maxDistance` must be finite and greater than 0. |
-| `INVALID_EXIT_DISTANCE` | `startMonitoring` | `exitDistance` must be finite, requires `maxDistance`, and cannot be smaller than it. |
-| `INVALID_EXIT_TIMEOUT` | `startMonitoring` | `exitTimeoutSeconds` must be finite and greater than 0. |
-| `PERMISSION_DENIED` | Scan and monitoring methods | Required location/Bluetooth permission was not granted. |
-| `WILDCARD_NOT_SUPPORTED` | `scanForBeaconsAsync` | iOS only: no UUIDs provided and no paired beacons exist. |
-| `BLUETOOTH_OFF` / `BLUETOOTH_UNAUTHORIZED` / `BLUETOOTH_UNSUPPORTED` | Eddystone scan / `onBeaconError` | iOS Bluetooth is unavailable for the stated reason. |
-| `REGION_LIMIT_EXCEEDED` | `onBeaconError` | iOS has no remaining Core Location region slot for a paired iBeacon. |
-| `RECEIVER_REGISTRATION_FAILED` / `SERVICE_START_FAILED` | `startMonitoring` | Android could not initialize native event delivery or its foreground service. |
+| Code                                                                       | Method / event                                      | Description                                                                                 |
+| -------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `SCAN_IN_PROGRESS`                                                       | `scanForBeaconsAsync`, `scanForEddystonesAsync` | A scan of the same type is already running. One iBeacon and one Eddystone scan may coexist. |
+| `SCAN_CANCELLED`                                                         | `scanForBeaconsAsync`, `scanForEddystonesAsync` | The scan was cancelled via`cancelScan()`.                                                 |
+| `SCAN_ERROR`                                                             | Scan methods /`onBeaconError`                     | The native scanner failed to start or stopped unexpectedly.                                 |
+| `INVALID_UUID`                                                           | `scanForBeaconsAsync`, `pairBeacon`             | Malformed UUID string.                                                                      |
+| `INVALID_DURATION`                                                       | `scanForBeaconsAsync`, `scanForEddystonesAsync` | Scan duration must be > 0.                                                                  |
+| `INVALID_IDENTIFIER`                                                     | `pairBeacon`, `pairEddystone`                   | Identifier must not be empty.                                                               |
+| `INVALID_MAJOR`                                                          | `pairBeacon`                                      | Major value not in range 0–65535.                                                          |
+| `INVALID_MINOR`                                                          | `pairBeacon`                                      | Minor value not in range 0–65535.                                                          |
+| `INVALID_NAMESPACE`                                                      | `pairEddystone`                                   | Namespace must be exactly 20 hex characters.                                                |
+| `INVALID_INSTANCE`                                                       | `pairEddystone`                                   | Instance must be exactly 12 hex characters.                                                 |
+| `INVALID_TIMEOUT`                                                        | `pairBeacon`, `pairEddystone`                   | `timeoutSeconds` must be greater than 0.                                                  |
+| `DUPLICATE_IDENTIFIER`                                                   | `pairBeacon`, `pairEddystone`                   | The identifier is already used by a paired beacon of the other type.                        |
+| `DUPLICATE_BEACON_IDENTITY`                                              | `pairBeacon`                                      | UUID + major + minor is already paired under another identifier.                            |
+| `DUPLICATE_EDDYSTONE_IDENTITY`                                           | `pairEddystone`                                   | Namespace + instance is already paired under another identifier.                            |
+| `NO_PAIRED_BEACONS`                                                      | `startMonitoring`                                 | Pair at least one iBeacon or Eddystone first.                                               |
+| `INVALID_MAX_DISTANCE`                                                   | `startMonitoring`                                 | `maxDistance` must be finite and greater than 0.                                          |
+| `INVALID_EXIT_DISTANCE`                                                  | `startMonitoring`                                 | `exitDistance` must be finite, requires `maxDistance`, and cannot be smaller than it.   |
+| `INVALID_EXIT_TIMEOUT`                                                   | `startMonitoring`                                 | `exitTimeoutSeconds` must be finite and greater than 0.                                   |
+| `PERMISSION_DENIED`                                                      | Scan and monitoring methods                         | Required location/Bluetooth permission was not granted.                                     |
+| `WILDCARD_NOT_SUPPORTED`                                                 | `scanForBeaconsAsync`                             | iOS only: no UUIDs provided and no paired beacons exist.                                    |
+| `BLUETOOTH_OFF` / `BLUETOOTH_UNAUTHORIZED` / `BLUETOOTH_UNSUPPORTED` | Eddystone scan /`onBeaconError`                   | iOS Bluetooth is unavailable for the stated reason.                                         |
+| `REGION_LIMIT_EXCEEDED`                                                  | `onBeaconError`                                   | iOS has no remaining Core Location region slot for a paired iBeacon.                        |
+| `RECEIVER_REGISTRATION_FAILED` / `SERVICE_START_FAILED`                | `startMonitoring`                                 | Android could not initialize native event delivery or its foreground service.               |
 
 ---
 
