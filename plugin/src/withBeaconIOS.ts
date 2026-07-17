@@ -9,9 +9,19 @@ import { createRequire } from "module";
 import * as path from "path";
 
 export type BeaconIOSPluginProps = {
+  /**
+   * Generate and register the optional
+   * `react-native-background-geolocation` lifecycle bridge.
+   *
+   * The peer package must be installed in the consuming app.
+   * @defaultValue false
+   */
   backgroundGeolocation?: boolean;
+  /** Value for `NSLocationWhenInUseUsageDescription`. */
   locationWhenInUsePermission?: string;
+  /** Value for `NSLocationAlwaysAndWhenInUseUsageDescription`. */
   locationAlwaysPermission?: string;
+  /** Value for `NSBluetoothAlwaysUsageDescription`. */
   bluetoothPermission?: string;
 };
 

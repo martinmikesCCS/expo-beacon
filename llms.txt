@@ -1,0 +1,35 @@
+# expo-beacon
+
+> Expo native module for scanning, pairing, and monitoring iBeacon and
+> Eddystone devices on Android and iOS. It requires a development build and
+> does not work in Expo Go.
+
+Use `npx expo install expo-beacon`, add `expo-beacon` to the Expo `plugins`
+array, request permissions before scanning, and pair devices before starting
+background monitoring. iOS cannot perform wildcard iBeacon scans. Eddystone
+scanning does not require an iBeacon UUID. The optional background-geolocation
+bridge requires `react-native-background-geolocation` in the consuming app.
+
+Prefer the named, object-based `scanForBeacons`, `scanForEddystones`,
+`pairBeacon`, and `pairEddystone` helpers for new code. The default export keeps
+the positional native API for backwards compatibility.
+
+## Start here
+
+- [Documentation index](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/index.md): Routes by task and identifies canonical pages.
+- [Getting started](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/getting-started.md): Installation, app configuration, permissions, and a type-safe scan.
+- [Platform support](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/platform-support.md): Android, iOS, and web capability matrix and constraints.
+
+## Guides
+
+- [Scanning](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/scanning.md): One-shot and continuous iBeacon and Eddystone discovery.
+- [Background monitoring](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/background-monitoring.md): Pairing, monitoring options, events, and cleanup.
+- [Config plugin](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/config-plugin.md): Typed plugin options and generated native configuration.
+- [Background geolocation](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/background-geolocation.md): Optional Transistorsoft integration and lifecycle behavior.
+- [Errors](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/errors.md): Typed error codes, likely causes, and corrective actions.
+
+## API reference
+
+- [Runtime API](https://github.com/martinmikesccs/expo-beacon/tree/master/docs/reference/runtime): Generated from exported TypeScript and TSDoc.
+- [Config-plugin API](https://github.com/martinmikesccs/expo-beacon/tree/master/docs/reference/plugin): Generated from plugin exports and TSDoc.
+- [Full compatibility reference](https://github.com/martinmikesccs/expo-beacon/blob/master/docs/full-reference.md): Detailed positional API reference and advanced examples.

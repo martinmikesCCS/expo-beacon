@@ -4,6 +4,13 @@ import { createRequire } from "module";
 import * as path from "path";
 
 export type BeaconAndroidPluginProps = {
+  /**
+   * Generate and register the optional
+   * `react-native-background-geolocation` lifecycle bridge.
+   *
+   * The peer package must be installed in the consuming app.
+   * @defaultValue false
+   */
   backgroundGeolocation?: boolean;
 };
 
@@ -20,8 +27,8 @@ import com.transistorsoft.locationmanager.adapter.callback.TSCallback
 import com.transistorsoft.locationmanager.adapter.callback.TSLocationCallback
 import com.transistorsoft.locationmanager.adapter.callback.TSSyncCallback
 import com.transistorsoft.locationmanager.data.LocationModel
+import com.transistorsoft.locationmanager.event.LocationEvent
 import com.transistorsoft.locationmanager.location.TSCurrentPositionRequest
-import com.transistorsoft.locationmanager.location.TSLocation
 import expo.modules.beacon.BeaconEventPlugin
 
 class BeaconGeoPlugin(context: Context) : BeaconEventPlugin {
@@ -109,7 +116,7 @@ class BeaconGeoPlugin(context: Context) : BeaconEventPlugin {
     val builder = TSCurrentPositionRequest.Builder(appContext)
     builder.setPersist(true)
     builder.setCallback(object : TSLocationCallback {
-      override fun onLocation(location: TSLocation) = runOnMain {
+      override fun onLocation(event: LocationEvent) = runOnMain {
         changeToStationary(generation)
       }
 

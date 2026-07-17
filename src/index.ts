@@ -1,5 +1,21 @@
-// Native module (default export)
-export { default } from "./ExpoBeaconModule.js";
+// Native module. The default export is retained for backwards compatibility;
+// the named export is easier to discover in generated documentation and IDEs.
+export { default, default as ExpoBeacon } from "./ExpoBeaconModule.js";
+export type { ExpoBeaconModule } from "./ExpoBeaconModule.js";
+
+// Object-based helpers for APIs whose native contracts use positional arguments.
+export {
+  pairBeacon,
+  pairEddystone,
+  scanForBeacons,
+  scanForEddystones,
+} from "./helpers.js";
+export type {
+  PairBeaconOptions,
+  PairEddystoneOptions,
+  ScanForBeaconsOptions,
+  ScanForEddystonesOptions,
+} from "./helpers.js";
 
 // React hooks
 export { useBeacon } from "./hooks/useBeacon.js";
@@ -34,4 +50,6 @@ export type {
   EddystoneTimeoutEvent,
   EventLogQueryOptions,
   EventLogEntry,
+  BeaconErrorCode,
+  BeaconEventName,
 } from "./ExpoBeacon.types";

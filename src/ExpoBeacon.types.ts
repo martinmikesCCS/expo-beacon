@@ -287,12 +287,48 @@ export type EddystoneTimeoutEvent = {
   distance: number;
 };
 
+/** Machine-readable errors emitted or rejected by the native module. */
+export type BeaconErrorCode =
+  | "BATTERY_OPT_ERROR"
+  | "BLUETOOTH_OFF"
+  | "BLUETOOTH_UNAUTHORIZED"
+  | "BLUETOOTH_UNSUPPORTED"
+  | "CONFIG_PARSE_ERROR"
+  | "DUPLICATE_BEACON_IDENTITY"
+  | "DUPLICATE_EDDYSTONE_IDENTITY"
+  | "DUPLICATE_IDENTIFIER"
+  | "INVALID_DURATION"
+  | "INVALID_EXIT_DISTANCE"
+  | "INVALID_EXIT_TIMEOUT"
+  | "INVALID_IDENTIFIER"
+  | "INVALID_INSTANCE"
+  | "INVALID_MAJOR"
+  | "INVALID_MAX_DISTANCE"
+  | "INVALID_MINOR"
+  | "INVALID_NAMESPACE"
+  | "INVALID_TIMEOUT"
+  | "INVALID_UUID"
+  | "MODULE_DESTROYED"
+  | "MONITORING_FAILED"
+  | "NO_CONTEXT"
+  | "NO_PAIRED_BEACONS"
+  | "PERMISSION_DENIED"
+  | "RANGING_FAILED"
+  | "RECEIVER_REGISTRATION_FAILED"
+  | "REGION_LIMIT_EXCEEDED"
+  | "SCAN_CANCELLED"
+  | "SCAN_ERROR"
+  | "SCAN_IN_PROGRESS"
+  | "SECURITY_EXCEPTION"
+  | "SERVICE_START_FAILED"
+  | "WILDCARD_NOT_SUPPORTED";
+
 /** Payload for native beacon error events (monitoring/ranging failures). */
 export type BeaconErrorEvent = {
   /** Region or constraint identifier, empty string if unavailable. */
   identifier: string;
-  /** Machine-readable error code (e.g. "MONITORING_FAILED", "RANGING_FAILED", "SECURITY_EXCEPTION"). */
-  code: string;
+  /** Machine-readable error code. */
+  code: BeaconErrorCode;
   /** Human-readable error message from the native layer. */
   message: string;
 };
@@ -317,12 +353,15 @@ export type ExpoBeaconModuleEvents = {
   onBeaconError: (params: BeaconErrorEvent) => void;
 };
 
+/** Every event name emitted by the module. */
+export type BeaconEventName = keyof ExpoBeaconModuleEvents;
+
 /** Options for filtering event logs. */
 export type EventLogQueryOptions = {
   /** Maximum number of log entries to return (default: 1000, max: 10000). */
   limit?: number;
-  /** Filter by event type (e.g. "onBeaconEnter", "onBeaconExit"). */
-  eventType?: string;
+  /** Filter by an emitted event type. */
+  eventType?: BeaconEventName;
   /** Only return events with timestamp >= this value (ms since epoch). */
   sinceTimestamp?: number;
 };
@@ -332,8 +371,8 @@ export type EventLogEntry = {
   id: number;
   /** Timestamp in milliseconds since epoch. */
   timestamp: number;
-  /** The event type that was logged (e.g. "onBeaconEnter"). */
-  eventType: string;
+  /** The event type that was logged. */
+  eventType: BeaconEventName;
   /** Beacon identifier, if available. */
   identifier?: string;
   /** The full event payload that was sent to JS. */

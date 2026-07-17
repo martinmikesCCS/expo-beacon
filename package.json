@@ -1,6 +1,6 @@
 {
   "name": "expo-beacon",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Expo module for scanning, pairing, and monitoring iBeacons on Android and iOS",
   "main": "build/cjs/index.js",
   "module": "build/index.js",
@@ -14,13 +14,28 @@
       "require": "./build/cjs/index.js",
       "default": "./build/index.js"
     },
-    "./app.plugin": "./app.plugin.js",
-    "./app.plugin.js": "./app.plugin.js"
+    "./plugin": {
+      "types": "./plugin/build/index.d.ts",
+      "require": "./plugin/build/index.js",
+      "default": "./plugin/build/index.js"
+    },
+    "./app.plugin": {
+      "types": "./plugin/build/index.d.ts",
+      "require": "./app.plugin.js",
+      "default": "./app.plugin.js"
+    },
+    "./app.plugin.js": {
+      "types": "./plugin/build/index.d.ts",
+      "require": "./app.plugin.js",
+      "default": "./app.plugin.js"
+    }
   },
   "files": [
     "build/",
     "plugin/build/",
     "app.plugin.js",
+    "docs/",
+    "llms.txt",
     "ios/",
     "android/src/",
     "android/build.gradle",
@@ -29,10 +44,13 @@
     "!src/__tests__/"
   ],
   "scripts": {
-    "build": "expo-module build && npm run build:cjs && npm run build:package-metadata",
+    "build": "expo-module build && npm run build:cjs && npm run build:package-metadata && npm run build:plugin",
     "build:cjs": "tsc -p tsconfig.cjs.json",
     "build:package-metadata": "node scripts/write-build-package-metadata.cjs",
     "build:plugin": "tsc -p plugin/tsconfig.json",
+    "docs:api": "typedoc --options typedoc.json && typedoc --options plugin/typedoc.json",
+    "docs:check": "npm run docs:api && git diff --exit-code -- docs/reference",
+    "test:types": "npm run build && tsc -p tests/consumer/tsconfig.json",
     "clean": "expo-module clean",
     "lint": "expo-module lint",
     "test": "expo-module test",
@@ -79,6 +97,8 @@
     "expo-module-scripts": "^55.0.2",
     "react": "19.2.0",
     "react-native": "0.83.2",
+    "typedoc": "^0.28.20",
+    "typedoc-plugin-markdown": "^4.12.0",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
