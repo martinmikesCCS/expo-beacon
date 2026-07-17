@@ -6,7 +6,7 @@
 
 # Interface: UseBeaconResult
 
-Defined in: [src/hooks/useBeacon.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L79)
+Defined in: [src/hooks/useBeacon.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L79)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [src/hooks/useBeacon.ts:79](https://github.com/martinmikesccs/expo-b
 
 > **cancelScan**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:124](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L124)
+Defined in: [src/hooks/useBeacon.ts:124](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L124)
 
 Cancel any in-progress one-shot scan.
 
@@ -28,7 +28,7 @@ Cancel any in-progress one-shot scan.
 
 > **clearEventLogs**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:151](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L151)
+Defined in: [src/hooks/useBeacon.ts:151](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L151)
 
 Delete all logged events (keeps logging enabled).
 
@@ -42,7 +42,7 @@ Delete all logged events (keeps logging enabled).
 
 > **destroyEventLogs**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:153](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L153)
+Defined in: [src/hooks/useBeacon.ts:153](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L153)
 
 Delete the event-log database and disable logging.
 
@@ -56,7 +56,7 @@ Delete the event-log database and disable logging.
 
 > **disableEventLogging**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:147](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L147)
+Defined in: [src/hooks/useBeacon.ts:147](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L147)
 
 Disable SQLite event logging (updates `isEventLoggingEnabled`).
 
@@ -70,7 +70,7 @@ Disable SQLite event logging (updates `isEventLoggingEnabled`).
 
 > **enableEventLogging**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L145)
+Defined in: [src/hooks/useBeacon.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L145)
 
 Enable SQLite event logging (updates `isEventLoggingEnabled`).
 
@@ -84,7 +84,7 @@ Enable SQLite event logging (updates `isEventLoggingEnabled`).
 
 > **getApiEndpoint**: () => `object`
 
-Defined in: [src/hooks/useBeacon.ts:158](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L158)
+Defined in: [src/hooks/useBeacon.ts:158](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L158)
 
 Read the current API forwarding configuration.
 
@@ -110,7 +110,7 @@ Read the current API forwarding configuration.
 
 > **getEventLogs**: (`options?`) => [`EventLogEntry`](../type-aliases/EventLogEntry.md)[]
 
-Defined in: [src/hooks/useBeacon.ts:149](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L149)
+Defined in: [src/hooks/useBeacon.ts:149](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L149)
 
 Retrieve logged events, optionally filtered.
 
@@ -130,7 +130,7 @@ Retrieve logged events, optionally filtered.
 
 > **getMonitoredDeviceState**: (`identifier`) => [`MonitoredDeviceState`](../type-aliases/MonitoredDeviceState.md) \| `null`
 
-Defined in: [src/hooks/useBeacon.ts:134](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L134)
+Defined in: [src/hooks/useBeacon.ts:134](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L134)
 
 State snapshot for one paired device, or `null` when the identifier is unknown.
 
@@ -150,7 +150,7 @@ State snapshot for one paired device, or `null` when the identifier is unknown.
 
 > **getMonitoredDeviceStates**: () => [`MonitoredDeviceState`](../type-aliases/MonitoredDeviceState.md)[]
 
-Defined in: [src/hooks/useBeacon.ts:136](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L136)
+Defined in: [src/hooks/useBeacon.ts:136](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L136)
 
 State snapshot for all paired devices.
 
@@ -164,7 +164,7 @@ State snapshot for all paired devices.
 
 > **getMonitoringConfig**: () => [`MonitoringConfig`](../type-aliases/MonitoringConfig.md)
 
-Defined in: [src/hooks/useBeacon.ts:132](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L132)
+Defined in: [src/hooks/useBeacon.ts:132](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L132)
 
 Read the current monitoring configuration and active-state snapshot.
 
@@ -178,7 +178,7 @@ Read the current monitoring configuration and active-state snapshot.
 
 > **inRange**: [`InRangeBeacon`](../type-aliases/InRangeBeacon.md)[]
 
-Defined in: [src/hooks/useBeacon.ts:90](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L90)
+Defined in: [src/hooks/useBeacon.ts:90](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L90)
 
 Paired beacons currently within range, derived live from monitoring
 enter / exit / distance / timeout events (empty when `track` is `false`).
@@ -191,7 +191,7 @@ Continuous-scan "found" events are delivered via the `onBeaconFound` /
 
 > **isBatteryOptimizationExempt**: () => `boolean`
 
-Defined in: [src/hooks/useBeacon.ts:165](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L165)
+Defined in: [src/hooks/useBeacon.ts:165](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L165)
 
 Whether the app is exempt from Android battery optimizations (always `true` on iOS / web).
 
@@ -205,7 +205,7 @@ Whether the app is exempt from Android battery optimizations (always `true` on i
 
 > **isEventLoggingEnabled**: `boolean`
 
-Defined in: [src/hooks/useBeacon.ts:94](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L94)
+Defined in: [src/hooks/useBeacon.ts:94](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L94)
 
 Whether SQLite event logging is currently enabled.
 
@@ -215,7 +215,7 @@ Whether SQLite event logging is currently enabled.
 
 > **isMonitoring**: `boolean`
 
-Defined in: [src/hooks/useBeacon.ts:92](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L92)
+Defined in: [src/hooks/useBeacon.ts:92](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L92)
 
 Whether background region monitoring is currently active.
 
@@ -225,7 +225,7 @@ Whether background region monitoring is currently active.
 
 > **pairBeacon**: (`identifier`, `uuid`, `major`, `minor`, `name?`, `timeoutSeconds?`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:98](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L98)
+Defined in: [src/hooks/useBeacon.ts:98](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L98)
 
 #### Parameters
 
@@ -263,7 +263,7 @@ Defined in: [src/hooks/useBeacon.ts:98](https://github.com/martinmikesccs/expo-b
 
 > **pairedBeacons**: [`PairedBeacon`](../type-aliases/PairedBeacon.md)[]
 
-Defined in: [src/hooks/useBeacon.ts:81](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L81)
+Defined in: [src/hooks/useBeacon.ts:81](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L81)
 
 Paired iBeacons, refreshed by the pairing actions and `refreshPaired`.
 
@@ -273,7 +273,7 @@ Paired iBeacons, refreshed by the pairing actions and `refreshPaired`.
 
 > **pairEddystone**: (`identifier`, `namespace`, `instance`, `name?`, `timeoutSeconds?`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:107](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L107)
+Defined in: [src/hooks/useBeacon.ts:107](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L107)
 
 #### Parameters
 
@@ -307,7 +307,7 @@ Defined in: [src/hooks/useBeacon.ts:107](https://github.com/martinmikesccs/expo-
 
 > **pairedEddystones**: [`PairedEddystone`](../type-aliases/PairedEddystone.md)[]
 
-Defined in: [src/hooks/useBeacon.ts:83](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L83)
+Defined in: [src/hooks/useBeacon.ts:83](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L83)
 
 Paired Eddystone beacons.
 
@@ -317,7 +317,7 @@ Paired Eddystone beacons.
 
 > **refreshPaired**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:97](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L97)
+Defined in: [src/hooks/useBeacon.ts:97](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L97)
 
 Re-read paired beacons from the native store.
 
@@ -331,7 +331,7 @@ Re-read paired beacons from the native store.
 
 > **requestBatteryOptimizationExemption**: () => `Promise`\<`boolean`\>
 
-Defined in: [src/hooks/useBeacon.ts:167](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L167)
+Defined in: [src/hooks/useBeacon.ts:167](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L167)
 
 Request exemption from Android battery optimizations (opens the system dialog).
 
@@ -345,7 +345,7 @@ Request exemption from Android battery optimizations (opens the system dialog).
 
 > **requestPermissions**: () => `Promise`\<`boolean`\>
 
-Defined in: [src/hooks/useBeacon.ts:170](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L170)
+Defined in: [src/hooks/useBeacon.ts:170](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L170)
 
 Request the platform permissions needed for scanning and monitoring.
 
@@ -359,7 +359,7 @@ Request the platform permissions needed for scanning and monitoring.
 
 > **scanForBeacons**: (`uuids?`, `scanDuration?`) => `Promise`\<[`BeaconScanResult`](../type-aliases/BeaconScanResult.md)[]\>
 
-Defined in: [src/hooks/useBeacon.ts:117](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L117)
+Defined in: [src/hooks/useBeacon.ts:117](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L117)
 
 One-shot iBeacon scan; resolves with discovered beacons.
 
@@ -383,7 +383,7 @@ One-shot iBeacon scan; resolves with discovered beacons.
 
 > **scanForEddystones**: (`scanDuration?`) => `Promise`\<[`EddystoneScanResult`](../type-aliases/EddystoneScanResult.md)[]\>
 
-Defined in: [src/hooks/useBeacon.ts:122](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L122)
+Defined in: [src/hooks/useBeacon.ts:122](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L122)
 
 One-shot Eddystone scan; resolves with discovered beacons.
 
@@ -403,7 +403,7 @@ One-shot Eddystone scan; resolves with discovered beacons.
 
 > **setApiEndpoint**: (`url`, `apiKey?`, `id?`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:156](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L156)
+Defined in: [src/hooks/useBeacon.ts:156](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L156)
 
 Configure a native API endpoint for background event forwarding.
 
@@ -431,7 +431,7 @@ Configure a native API endpoint for background event forwarding.
 
 > **setBeaconNotificationConfig**: (`config`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:141](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L141)
+Defined in: [src/hooks/useBeacon.ts:141](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L141)
 
 Persist only beacon notification settings.
 
@@ -451,7 +451,7 @@ Persist only beacon notification settings.
 
 > **setNotificationConfig**: (`config`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L139)
+Defined in: [src/hooks/useBeacon.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L139)
 
 Persist notification configuration applied to subsequent monitoring sessions.
 
@@ -471,7 +471,7 @@ Persist notification configuration applied to subsequent monitoring sessions.
 
 > **startContinuousScan**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:126](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L126)
+Defined in: [src/hooks/useBeacon.ts:126](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L126)
 
 Start a continuous scan; results stream via `onBeaconFound` / `onEddystoneFound`.
 
@@ -485,7 +485,7 @@ Start a continuous scan; results stream via `onBeaconFound` / `onEddystoneFound`
 
 > **startMonitoring**: (`options?`) => `Promise`\<`void`\>
 
-Defined in: [src/hooks/useBeacon.ts:129](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L129)
+Defined in: [src/hooks/useBeacon.ts:129](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L129)
 
 #### Parameters
 
@@ -503,7 +503,7 @@ Defined in: [src/hooks/useBeacon.ts:129](https://github.com/martinmikesccs/expo-
 
 > **stopContinuousScan**: () => `void`
 
-Defined in: [src/hooks/useBeacon.ts:127](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L127)
+Defined in: [src/hooks/useBeacon.ts:127](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L127)
 
 #### Returns
 
@@ -515,7 +515,7 @@ Defined in: [src/hooks/useBeacon.ts:127](https://github.com/martinmikesccs/expo-
 
 > **stopMonitoring**: () => `Promise`\<`void`\>
 
-Defined in: [src/hooks/useBeacon.ts:130](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L130)
+Defined in: [src/hooks/useBeacon.ts:130](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L130)
 
 #### Returns
 
@@ -527,7 +527,7 @@ Defined in: [src/hooks/useBeacon.ts:130](https://github.com/martinmikesccs/expo-
 
 > **unpairBeacon**: (`identifier`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:106](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L106)
+Defined in: [src/hooks/useBeacon.ts:106](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L106)
 
 #### Parameters
 
@@ -545,7 +545,7 @@ Defined in: [src/hooks/useBeacon.ts:106](https://github.com/martinmikesccs/expo-
 
 > **unpairEddystone**: (`identifier`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:114](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L114)
+Defined in: [src/hooks/useBeacon.ts:114](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L114)
 
 #### Parameters
 

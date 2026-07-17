@@ -8,7 +8,7 @@
 
 > **InRangeBeacon** = \{ `distance`: `number`; `identifier`: `string`; `kind`: `"ibeacon"`; `lastSeen`: `number`; `major`: `number`; `minor`: `number`; `rssi?`: `number`; `uuid`: `string`; \} \| \{ `distance`: `number`; `identifier`: `string`; `instance`: `string`; `kind`: `"eddystone"`; `lastSeen`: `number`; `namespace`: `string`; `rssi?`: `number`; \}
 
-Defined in: [src/hooks/useBeacon.ts:30](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L30)
+Defined in: [src/hooks/useBeacon.ts:30](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L30)
 
 A monitored beacon that is currently within range, as tracked by
 [useBeacon](../functions/useBeacon.md) from live enter / exit / distance / timeout events.

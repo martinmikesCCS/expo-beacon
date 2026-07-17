@@ -8,7 +8,7 @@
 
 > **MonitoringConfig** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:137](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L137)
+Defined in: [src/ExpoBeacon.types.ts:137](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L137)
 
 Snapshot of the current monitoring configuration and active state.
 
@@ -18,7 +18,7 @@ Snapshot of the current monitoring configuration and active state.
 
 > `optional` **exitDistance?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:141](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L141)
+Defined in: [src/ExpoBeacon.types.ts:141](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L141)
 
 ***
 
@@ -26,7 +26,7 @@ Defined in: [src/ExpoBeacon.types.ts:141](https://github.com/martinmikesccs/expo
 
 > `optional` **exitTimeoutSeconds?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L145)
+Defined in: [src/ExpoBeacon.types.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L145)
 
 Seconds after last beacon sighting before an exit event fires. Default: 300.
 
@@ -36,7 +36,7 @@ Seconds after last beacon sighting before an exit event fires. Default: 300.
 
 > **isMonitoring**: `boolean`
 
-Defined in: [src/ExpoBeacon.types.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L139)
+Defined in: [src/ExpoBeacon.types.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L139)
 
 Whether background monitoring is currently active.
 
@@ -46,7 +46,7 @@ Whether background monitoring is currently active.
 
 > `optional` **level?**: `"all"` \| `"events"`
 
-Defined in: [src/ExpoBeacon.types.ts:143](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L143)
+Defined in: [src/ExpoBeacon.types.ts:143](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L143)
 
 ***
 
@@ -54,7 +54,7 @@ Defined in: [src/ExpoBeacon.types.ts:143](https://github.com/martinmikesccs/expo
 
 > `optional` **maxDistance?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:140](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L140)
+Defined in: [src/ExpoBeacon.types.ts:140](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L140)
 
 ***
 
@@ -62,7 +62,7 @@ Defined in: [src/ExpoBeacon.types.ts:140](https://github.com/martinmikesccs/expo
 
 > `optional` **minRssi?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:142](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L142)
+Defined in: [src/ExpoBeacon.types.ts:142](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L142)
 
 ***
 
@@ -70,4 +70,4 @@ Defined in: [src/ExpoBeacon.types.ts:142](https://github.com/martinmikesccs/expo
 
 > `optional` **notifications?**: [`NotificationConfig`](NotificationConfig.md)
 
-Defined in: [src/ExpoBeacon.types.ts:146](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L146)
+Defined in: [src/ExpoBeacon.types.ts:146](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L146)

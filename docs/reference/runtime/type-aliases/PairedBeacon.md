@@ -8,7 +8,7 @@
 
 > **PairedBeacon** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L19)
+Defined in: [src/ExpoBeacon.types.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L19)
 
 A beacon that has been paired/registered for monitoring.
 
@@ -21,7 +21,7 @@ SharedPreferences (Android) and may be included in device backups.
 
 > **identifier**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:20](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L20)
+Defined in: [src/ExpoBeacon.types.ts:20](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L20)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [src/ExpoBeacon.types.ts:20](https://github.com/martinmikesccs/expo-
 
 > **major**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:22](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L22)
+Defined in: [src/ExpoBeacon.types.ts:22](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L22)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [src/ExpoBeacon.types.ts:22](https://github.com/martinmikesccs/expo-
 
 > **minor**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:23](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L23)
+Defined in: [src/ExpoBeacon.types.ts:23](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L23)
 
 ***
 
@@ -45,7 +45,7 @@ Defined in: [src/ExpoBeacon.types.ts:23](https://github.com/martinmikesccs/expo-
 
 > `optional` **name?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:25](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L25)
+Defined in: [src/ExpoBeacon.types.ts:25](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L25)
 
 BLE advertising device name, if provided at pairing time.
 
@@ -55,7 +55,7 @@ BLE advertising device name, if provided at pairing time.
 
 > `optional` **timeoutSeconds?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:33](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L33)
+Defined in: [src/ExpoBeacon.types.ts:33](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L33)
 
 Timeout in seconds. When set, the module fires `onBeaconTimeout` once,
 this many seconds after the beacon exits range. The countdown is armed on
@@ -69,4 +69,4 @@ again before it fires.
 
 > **uuid**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:21](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L21)
+Defined in: [src/ExpoBeacon.types.ts:21](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L21)

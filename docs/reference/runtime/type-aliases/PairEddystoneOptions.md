@@ -8,7 +8,7 @@
 
 > **PairEddystoneOptions** = `object`
 
-Defined in: src/helpers.ts:41
+Defined in: [src/helpers.ts:41](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L41)
 
 An Eddystone-UID registration used for persistent monitoring.
 
@@ -18,7 +18,7 @@ An Eddystone-UID registration used for persistent monitoring.
 
 > **identifier**: `string`
 
-Defined in: src/helpers.ts:43
+Defined in: [src/helpers.ts:43](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L43)
 
 Stable application-defined identifier, for example `meeting-room`.
 
@@ -28,7 +28,7 @@ Stable application-defined identifier, for example `meeting-room`.
 
 > **instance**: `string`
 
-Defined in: src/helpers.ts:47
+Defined in: [src/helpers.ts:47](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L47)
 
 Six-byte instance ID encoded as exactly 12 hexadecimal characters.
 
@@ -38,7 +38,7 @@ Six-byte instance ID encoded as exactly 12 hexadecimal characters.
 
 > `optional` **name?**: `string`
 
-Defined in: src/helpers.ts:49
+Defined in: [src/helpers.ts:49](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L49)
 
 Optional display name stored with the registration.
 
@@ -48,7 +48,7 @@ Optional display name stored with the registration.
 
 > **namespace**: `string`
 
-Defined in: src/helpers.ts:45
+Defined in: [src/helpers.ts:45](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L45)
 
 Ten-byte namespace ID encoded as exactly 20 hexadecimal characters.
 
@@ -58,6 +58,6 @@ Ten-byte namespace ID encoded as exactly 20 hexadecimal characters.
 
 > `optional` **timeoutSeconds?**: `number`
 
-Defined in: src/helpers.ts:51
+Defined in: [src/helpers.ts:51](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L51)
 
 Optional out-of-range timeout in seconds. Must be greater than zero.

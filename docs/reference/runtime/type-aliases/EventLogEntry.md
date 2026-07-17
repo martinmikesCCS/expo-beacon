@@ -8,7 +8,7 @@
 
 > **EventLogEntry** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:370](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L370)
+Defined in: [src/ExpoBeacon.types.ts:370](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L370)
 
 A single logged beacon event entry.
 
@@ -18,7 +18,7 @@ A single logged beacon event entry.
 
 > **data**: `Record`\<`string`, `unknown`\>
 
-Defined in: [src/ExpoBeacon.types.ts:379](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L379)
+Defined in: [src/ExpoBeacon.types.ts:379](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L379)
 
 The full event payload that was sent to JS.
 
@@ -28,7 +28,7 @@ The full event payload that was sent to JS.
 
 > **eventType**: [`BeaconEventName`](BeaconEventName.md)
 
-Defined in: [src/ExpoBeacon.types.ts:375](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L375)
+Defined in: [src/ExpoBeacon.types.ts:375](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L375)
 
 The event type that was logged.
 
@@ -38,7 +38,7 @@ The event type that was logged.
 
 > **id**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:371](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L371)
+Defined in: [src/ExpoBeacon.types.ts:371](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L371)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: [src/ExpoBeacon.types.ts:371](https://github.com/martinmikesccs/expo
 
 > `optional` **identifier?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:377](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L377)
+Defined in: [src/ExpoBeacon.types.ts:377](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L377)
 
 Beacon identifier, if available.
 
@@ -56,6 +56,6 @@ Beacon identifier, if available.
 
 > **timestamp**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:373](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L373)
+Defined in: [src/ExpoBeacon.types.ts:373](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L373)
 
 Timestamp in milliseconds since epoch.

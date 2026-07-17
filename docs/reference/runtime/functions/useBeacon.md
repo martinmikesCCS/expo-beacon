@@ -8,7 +8,7 @@
 
 > **useBeacon**(`options?`): [`UseBeaconResult`](../interfaces/UseBeaconResult.md)
 
-Defined in: [src/hooks/useBeacon.ts:187](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L187)
+Defined in: [src/hooks/useBeacon.ts:187](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L187)
 
 Manage iBeacon / Eddystone scanning and background monitoring.
 

@@ -8,7 +8,7 @@
 
 > **MonitoredDeviceState** = \{ `distance`: `number` \| `null`; `identifier`: `string`; `kind`: `"ibeacon"`; `major`: `number`; `minor`: `number`; `state`: `"entered"` \| `"exited"`; `uuid`: `string`; \} \| \{ `distance`: `number` \| `null`; `identifier`: `string`; `instance`: `string`; `kind`: `"eddystone"`; `namespace`: `string`; `state`: `"entered"` \| `"exited"`; \}
 
-Defined in: [src/ExpoBeacon.types.ts:150](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L150)
+Defined in: [src/ExpoBeacon.types.ts:150](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L150)
 
 Current state snapshot for a paired monitored device.
 

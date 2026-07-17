@@ -8,7 +8,7 @@
 
 > **EddystoneScanResult** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:220](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L220)
+Defined in: [src/ExpoBeacon.types.ts:220](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L220)
 
 Raw Eddystone beacon discovered during a scan.
 
@@ -18,7 +18,7 @@ Raw Eddystone beacon discovered during a scan.
 
 > **distance**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:229](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L229)
+Defined in: [src/ExpoBeacon.types.ts:229](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L229)
 
 ***
 
@@ -26,7 +26,7 @@ Defined in: [src/ExpoBeacon.types.ts:229](https://github.com/martinmikesccs/expo
 
 > **frameType**: [`EddystoneFrameType`](EddystoneFrameType.md)
 
-Defined in: [src/ExpoBeacon.types.ts:221](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L221)
+Defined in: [src/ExpoBeacon.types.ts:221](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L221)
 
 ***
 
@@ -34,7 +34,7 @@ Defined in: [src/ExpoBeacon.types.ts:221](https://github.com/martinmikesccs/expo
 
 > `optional` **instance?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:225](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L225)
+Defined in: [src/ExpoBeacon.types.ts:225](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L225)
 
 6-byte instance ID as hex string (12 chars). Present for UID frames.
 
@@ -44,7 +44,7 @@ Defined in: [src/ExpoBeacon.types.ts:225](https://github.com/martinmikesccs/expo
 
 > `optional` **name?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:232](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L232)
+Defined in: [src/ExpoBeacon.types.ts:232](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L232)
 
 BLE advertising device name.
 
@@ -54,7 +54,7 @@ BLE advertising device name.
 
 > `optional` **namespace?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:223](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L223)
+Defined in: [src/ExpoBeacon.types.ts:223](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L223)
 
 10-byte namespace ID as hex string (20 chars). Present for UID frames.
 
@@ -64,7 +64,7 @@ Defined in: [src/ExpoBeacon.types.ts:223](https://github.com/martinmikesccs/expo
 
 > **rssi**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:228](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L228)
+Defined in: [src/ExpoBeacon.types.ts:228](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L228)
 
 ***
 
@@ -72,7 +72,7 @@ Defined in: [src/ExpoBeacon.types.ts:228](https://github.com/martinmikesccs/expo
 
 > **txPower**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:230](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L230)
+Defined in: [src/ExpoBeacon.types.ts:230](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L230)
 
 ***
 
@@ -80,6 +80,6 @@ Defined in: [src/ExpoBeacon.types.ts:230](https://github.com/martinmikesccs/expo
 
 > `optional` **url?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:227](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L227)
+Defined in: [src/ExpoBeacon.types.ts:227](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L227)
 
 Decoded URL. Present for URL frames.

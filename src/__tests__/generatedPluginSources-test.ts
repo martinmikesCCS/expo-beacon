@@ -42,8 +42,10 @@ describe("generated Beacon background-geolocation plugins", () => {
       "if self.activeBeaconReasons.isEmpty { self.scheduleFinalization() }",
     );
     expect(source).toContain("private static let stopGrace: TimeInterval = 30");
-    expect(source).toContain("TSCurrentPositionRequest(");
-    expect(source).toContain("persist: true");
+    expect(source).toContain("TSCurrentPositionRequest.make(");
+    expect(source).toContain("type: .current");
+    expect(source).toContain("request.persist = true");
+    expect(source).not.toContain("let request = TSCurrentPositionRequest(");
     expect(source).toContain("onMotionChange");
     expect(source).toContain("stationaryTransitionCompleted()");
     expect(source).toContain("syncAndStop(generation: generation)");

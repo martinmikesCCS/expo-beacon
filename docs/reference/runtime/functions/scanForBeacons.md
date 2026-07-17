@@ -8,7 +8,7 @@
 
 > **scanForBeacons**(`options?`): `Promise`\<[`BeaconScanResult`](../type-aliases/BeaconScanResult.md)[]\>
 
-Defined in: src/helpers.ts:65
+Defined in: [src/helpers.ts:65](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L65)
 
 Scan once for iBeacons using a self-describing options object.
 

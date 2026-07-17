@@ -8,7 +8,7 @@
 
 > **BeaconScanResult** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:2](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L2)
+Defined in: [src/ExpoBeacon.types.ts:2](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L2)
 
 Raw beacon discovered during a scan.
 
@@ -18,7 +18,7 @@ Raw beacon discovered during a scan.
 
 > **distance**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:7](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L7)
+Defined in: [src/ExpoBeacon.types.ts:7](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L7)
 
 ***
 
@@ -26,7 +26,7 @@ Defined in: [src/ExpoBeacon.types.ts:7](https://github.com/martinmikesccs/expo-b
 
 > **major**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:4](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L4)
+Defined in: [src/ExpoBeacon.types.ts:4](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L4)
 
 ***
 
@@ -34,7 +34,7 @@ Defined in: [src/ExpoBeacon.types.ts:4](https://github.com/martinmikesccs/expo-b
 
 > **minor**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:5](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L5)
+Defined in: [src/ExpoBeacon.types.ts:5](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L5)
 
 ***
 
@@ -42,7 +42,7 @@ Defined in: [src/ExpoBeacon.types.ts:5](https://github.com/martinmikesccs/expo-b
 
 > `optional` **name?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:10](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L10)
+Defined in: [src/ExpoBeacon.types.ts:10](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L10)
 
 BLE advertising device name. May be undefined on iOS (CoreLocation does not expose it for iBeacon).
 
@@ -52,7 +52,7 @@ BLE advertising device name. May be undefined on iOS (CoreLocation does not expo
 
 > **rssi**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:6](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L6)
+Defined in: [src/ExpoBeacon.types.ts:6](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L6)
 
 ***
 
@@ -60,7 +60,7 @@ Defined in: [src/ExpoBeacon.types.ts:6](https://github.com/martinmikesccs/expo-b
 
 > **txPower**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:8](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L8)
+Defined in: [src/ExpoBeacon.types.ts:8](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L8)
 
 ***
 
@@ -68,4 +68,4 @@ Defined in: [src/ExpoBeacon.types.ts:8](https://github.com/martinmikesccs/expo-b
 
 > **uuid**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:3](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L3)
+Defined in: [src/ExpoBeacon.types.ts:3](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L3)

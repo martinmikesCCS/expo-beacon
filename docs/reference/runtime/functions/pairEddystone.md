@@ -8,7 +8,7 @@
 
 > **pairEddystone**(`options`): `void`
 
-Defined in: src/helpers.ts:92
+Defined in: [src/helpers.ts:92](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L92)
 
 Register an Eddystone-UID beacon for persistent monitoring.
 

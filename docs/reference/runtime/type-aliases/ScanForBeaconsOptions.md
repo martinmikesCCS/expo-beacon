@@ -8,7 +8,7 @@
 
 > **ScanForBeaconsOptions** = `object`
 
-Defined in: src/helpers.ts:5
+Defined in: [src/helpers.ts:5](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L5)
 
 Options for a one-shot iBeacon scan.
 
@@ -18,7 +18,7 @@ Options for a one-shot iBeacon scan.
 
 > `optional` **durationMs?**: `number`
 
-Defined in: src/helpers.ts:15
+Defined in: [src/helpers.ts:15](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L15)
 
 Scan duration in milliseconds.
 
@@ -34,7 +34,7 @@ Scan duration in milliseconds.
 
 > `optional` **uuids?**: readonly `string`[]
 
-Defined in: src/helpers.ts:13
+Defined in: [src/helpers.ts:13](https://github.com/martinmikesccs/expo-beacon/blob/master/src/helpers.ts#L13)
 
 Proximity UUIDs to scan for.
 

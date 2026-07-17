@@ -8,7 +8,7 @@
 
 > **BeaconPluginProps** = `object`
 
-Defined in: [index.ts:10](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/index.ts#L10)
+Defined in: [index.ts:10](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/index.ts#L10)
 
 Options accepted by the bundled Expo config plugin.
 
@@ -18,7 +18,7 @@ Options accepted by the bundled Expo config plugin.
 
 > `optional` **android?**: [`BeaconAndroidPluginProps`](BeaconAndroidPluginProps.md)
 
-Defined in: [index.ts:14](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/index.ts#L14)
+Defined in: [index.ts:14](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/index.ts#L14)
 
 Android optional native integration settings.
 
@@ -28,6 +28,6 @@ Android optional native integration settings.
 
 > `optional` **ios?**: [`BeaconIOSPluginProps`](BeaconIOSPluginProps.md)
 
-Defined in: [index.ts:12](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/index.ts#L12)
+Defined in: [index.ts:12](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/index.ts#L12)
 
 iOS permission strings and optional native integration settings.

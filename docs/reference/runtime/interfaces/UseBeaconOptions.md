@@ -6,7 +6,7 @@
 
 # Interface: UseBeaconOptions
 
-Defined in: [src/hooks/useBeacon.ts:57](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L57)
+Defined in: [src/hooks/useBeacon.ts:57](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L57)
 
 ## Properties
 
@@ -14,7 +14,7 @@ Defined in: [src/hooks/useBeacon.ts:57](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onBeaconDistance?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:60](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L60)
+Defined in: [src/hooks/useBeacon.ts:60](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L60)
 
 #### Parameters
 
@@ -32,7 +32,7 @@ Defined in: [src/hooks/useBeacon.ts:60](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onBeaconEnter?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:58](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L58)
+Defined in: [src/hooks/useBeacon.ts:58](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L58)
 
 #### Parameters
 
@@ -50,7 +50,7 @@ Defined in: [src/hooks/useBeacon.ts:58](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onBeaconExit?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:59](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L59)
+Defined in: [src/hooks/useBeacon.ts:59](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L59)
 
 #### Parameters
 
@@ -68,7 +68,7 @@ Defined in: [src/hooks/useBeacon.ts:59](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onBeaconFound?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:63](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L63)
+Defined in: [src/hooks/useBeacon.ts:63](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L63)
 
 Fired for each iBeacon seen during a continuous scan (see `startContinuousScan`).
 
@@ -88,7 +88,7 @@ Fired for each iBeacon seen during a continuous scan (see `startContinuousScan`)
 
 > `optional` **onBeaconTimeout?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:61](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L61)
+Defined in: [src/hooks/useBeacon.ts:61](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L61)
 
 #### Parameters
 
@@ -106,7 +106,7 @@ Defined in: [src/hooks/useBeacon.ts:61](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onEddystoneDistance?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:66](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L66)
+Defined in: [src/hooks/useBeacon.ts:66](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L66)
 
 #### Parameters
 
@@ -124,7 +124,7 @@ Defined in: [src/hooks/useBeacon.ts:66](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onEddystoneEnter?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:64](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L64)
+Defined in: [src/hooks/useBeacon.ts:64](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L64)
 
 #### Parameters
 
@@ -142,7 +142,7 @@ Defined in: [src/hooks/useBeacon.ts:64](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onEddystoneExit?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:65](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L65)
+Defined in: [src/hooks/useBeacon.ts:65](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L65)
 
 #### Parameters
 
@@ -160,7 +160,7 @@ Defined in: [src/hooks/useBeacon.ts:65](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onEddystoneFound?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:69](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L69)
+Defined in: [src/hooks/useBeacon.ts:69](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L69)
 
 Fired for each Eddystone seen during a continuous scan (see `startContinuousScan`).
 
@@ -180,7 +180,7 @@ Fired for each Eddystone seen during a continuous scan (see `startContinuousScan
 
 > `optional` **onEddystoneTimeout?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:67](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L67)
+Defined in: [src/hooks/useBeacon.ts:67](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L67)
 
 #### Parameters
 
@@ -198,7 +198,7 @@ Defined in: [src/hooks/useBeacon.ts:67](https://github.com/martinmikesccs/expo-b
 
 > `optional` **onError?**: (`event`) => `void`
 
-Defined in: [src/hooks/useBeacon.ts:71](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L71)
+Defined in: [src/hooks/useBeacon.ts:71](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L71)
 
 Fired on native monitoring / ranging failures.
 
@@ -218,7 +218,7 @@ Fired on native monitoring / ranging failures.
 
 > `optional` **track?**: `boolean`
 
-Defined in: [src/hooks/useBeacon.ts:76](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/hooks/useBeacon.ts#L76)
+Defined in: [src/hooks/useBeacon.ts:76](https://github.com/martinmikesccs/expo-beacon/blob/master/src/hooks/useBeacon.ts#L76)
 
 Maintain the reactive `inRange` list from monitoring events. Set to `false`
 if you only want the event callbacks above. Default: `true`.

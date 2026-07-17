@@ -6,7 +6,7 @@
 
 # Interface: ExpoBeaconModule
 
-Defined in: [src/ExpoBeaconModule.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L19)
+Defined in: [src/ExpoBeaconModule.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L19)
 
 ## Extends
 
@@ -52,7 +52,7 @@ Adds a listener for the given event name.
 
 > **cancelScan**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L145)
+Defined in: [src/ExpoBeaconModule.ts:145](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L145)
 
 Cancel any in-progress one-shot scan (iBeacon or Eddystone).
 The pending promise will be rejected with code "SCAN_CANCELLED".
@@ -67,7 +67,7 @@ The pending promise will be rejected with code "SCAN_CANCELLED".
 
 > **clearEventLogs**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:192](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L192)
+Defined in: [src/ExpoBeaconModule.ts:192](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L192)
 
 Delete all logged events from the database.
 
@@ -81,7 +81,7 @@ Delete all logged events from the database.
 
 > **destroyEventLogs**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:195](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L195)
+Defined in: [src/ExpoBeaconModule.ts:195](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L195)
 
 Delete the entire event log database. Also disables logging.
 
@@ -95,7 +95,7 @@ Delete the entire event log database. Also disables logging.
 
 > **disableEventLogging**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:177](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L177)
+Defined in: [src/ExpoBeaconModule.ts:177](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L177)
 
 Disable event logging. Previously logged events are retained.
 
@@ -144,7 +144,7 @@ The event can include any number of arguments that will be passed to the listene
 
 > **enableEventLogging**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:174](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L174)
+Defined in: [src/ExpoBeaconModule.ts:174](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L174)
 
 Enable SQLite event logging. All beacon events will be persisted to a local database.
 
@@ -158,7 +158,7 @@ Enable SQLite event logging. All beacon events will be persisted to a local data
 
 > **getApiEndpoint**(): `object`
 
-Defined in: [src/ExpoBeaconModule.ts:230](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L230)
+Defined in: [src/ExpoBeaconModule.ts:230](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L230)
 
 Return the current API forwarding configuration.
 Each field is `null` if not set.
@@ -185,7 +185,7 @@ Each field is `null` if not set.
 
 > **getEventLogs**(`options?`): [`EventLogEntry`](../type-aliases/EventLogEntry.md)[]
 
-Defined in: [src/ExpoBeaconModule.ts:189](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L189)
+Defined in: [src/ExpoBeaconModule.ts:189](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L189)
 
 Retrieve logged beacon events from the SQLite database.
 
@@ -207,7 +207,7 @@ Optional filters (limit, eventType, sinceTimestamp).
 
 > **getMonitoredDeviceState**(`identifier`): [`MonitoredDeviceState`](../type-aliases/MonitoredDeviceState.md) \| `null`
 
-Defined in: [src/ExpoBeaconModule.ts:219](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L219)
+Defined in: [src/ExpoBeaconModule.ts:219](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L219)
 
 Return the current state snapshot for a paired monitored device.
 Returns null when no paired device matches the identifier.
@@ -228,7 +228,7 @@ Returns null when no paired device matches the identifier.
 
 > **getMonitoredDeviceStates**(): [`MonitoredDeviceState`](../type-aliases/MonitoredDeviceState.md)[]
 
-Defined in: [src/ExpoBeaconModule.ts:224](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L224)
+Defined in: [src/ExpoBeaconModule.ts:224](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L224)
 
 Return the current state snapshot for all paired monitored devices.
 
@@ -242,7 +242,7 @@ Return the current state snapshot for all paired monitored devices.
 
 > **getMonitoringConfig**(): [`MonitoringConfig`](../type-aliases/MonitoringConfig.md)
 
-Defined in: [src/ExpoBeaconModule.ts:213](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L213)
+Defined in: [src/ExpoBeaconModule.ts:213](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L213)
 
 Return the current monitoring configuration and active state.
 Option fields are undefined if not explicitly set.
@@ -257,7 +257,7 @@ Option fields are undefined if not explicitly set.
 
 > **getPairedBeacons**(): [`PairedBeacon`](../type-aliases/PairedBeacon.md)[]
 
-Defined in: [src/ExpoBeaconModule.ts:69](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L69)
+Defined in: [src/ExpoBeaconModule.ts:69](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L69)
 
 Return all currently paired beacons.
 
@@ -271,7 +271,7 @@ Return all currently paired beacons.
 
 > **getPairedEddystones**(): [`PairedEddystone`](../type-aliases/PairedEddystone.md)[]
 
-Defined in: [src/ExpoBeaconModule.ts:95](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L95)
+Defined in: [src/ExpoBeaconModule.ts:95](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L95)
 
 Return all currently paired Eddystone beacons.
 
@@ -285,7 +285,7 @@ Return all currently paired Eddystone beacons.
 
 > **isBatteryOptimizationExempt**(): `boolean`
 
-Defined in: [src/ExpoBeaconModule.ts:163](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L163)
+Defined in: [src/ExpoBeaconModule.ts:163](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L163)
 
 Check whether the app is exempt from Android battery optimizations.
 Always returns true on iOS and web (no equivalent concept).
@@ -300,7 +300,7 @@ Always returns true on iOS and web (no equivalent concept).
 
 > **isEventLoggingEnabled**(): `boolean`
 
-Defined in: [src/ExpoBeaconModule.ts:183](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L183)
+Defined in: [src/ExpoBeaconModule.ts:183](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L183)
 
 Returns whether SQLite event logging is currently enabled.
 Reads the persisted flag, so this stays accurate across app cold-starts.
@@ -345,7 +345,7 @@ Returns a number of listeners added to the given event.
 
 > **pairBeacon**(`identifier`, `uuid`, `major`, `minor`, `name?`, `timeoutSeconds?`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:52](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L52)
+Defined in: [src/ExpoBeaconModule.ts:52](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L52)
 
 Register a beacon for persistent region monitoring.
 
@@ -389,7 +389,7 @@ paired Eddystone beacon.
 
 > **pairEddystone**(`identifier`, `namespace`, `instance`, `name?`, `timeoutSeconds?`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L79)
+Defined in: [src/ExpoBeaconModule.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L79)
 
 Register an Eddystone-UID beacon for persistent monitoring.
 Namespace and instance are normalized to lowercase before storage.
@@ -488,7 +488,7 @@ Removes a listener for the given event name.
 
 > **requestBatteryOptimizationExemption**(): `Promise`\<`boolean`\>
 
-Defined in: [src/ExpoBeaconModule.ts:171](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L171)
+Defined in: [src/ExpoBeaconModule.ts:171](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L171)
 
 Request exemption from Android battery optimizations.
 Opens the system dialog asking the user to whitelist this app.
@@ -505,7 +505,7 @@ Always resolves true on iOS and web.
 
 > **requestPermissionsAsync**(): `Promise`\<`boolean`\>
 
-Defined in: [src/ExpoBeaconModule.ts:157](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L157)
+Defined in: [src/ExpoBeaconModule.ts:157](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L157)
 
 Request the permissions needed for scanning and monitoring.
 
@@ -526,7 +526,7 @@ Request the permissions needed for scanning and monitoring.
 
 > **scanForBeaconsAsync**(`uuids?`, `scanDuration?`): `Promise`\<[`BeaconScanResult`](../type-aliases/BeaconScanResult.md)[]\>
 
-Defined in: [src/ExpoBeaconModule.ts:32](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L32)
+Defined in: [src/ExpoBeaconModule.ts:32](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L32)
 
 Start a one-shot iBeacon scan. Resolves with discovered beacons after scanDuration ms.
 
@@ -560,7 +560,7 @@ Duration in ms (default 5000)
 
 > **scanForEddystonesAsync**(`scanDuration?`): `Promise`\<[`EddystoneScanResult`](../type-aliases/EddystoneScanResult.md)[]\>
 
-Defined in: [src/ExpoBeaconModule.ts:43](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L43)
+Defined in: [src/ExpoBeaconModule.ts:43](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L43)
 
 Start a one-shot Eddystone beacon scan using BLE.
 Discovers Eddystone-UID and Eddystone-URL frames.
@@ -583,7 +583,7 @@ Duration in ms (default 5000)
 
 > **setApiEndpoint**(`url`, `apiKey?`, `id?`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:207](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L207)
+Defined in: [src/ExpoBeaconModule.ts:207](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L207)
 
 Configure a remote API endpoint for native event forwarding.
 Once set, beacon events are POSTed directly from native code,
@@ -620,7 +620,7 @@ Optional identifier appended to every forwarded event payload.
 
 > **setBeaconNotificationConfig**(`config`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:107](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L107)
+Defined in: [src/ExpoBeaconModule.ts:107](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L107)
 
 Persist beacon notification settings without replacing other beacon settings.
 Passing a plain BeaconNotificationConfig is treated as the beacon event config.
@@ -641,7 +641,7 @@ Passing a plain BeaconNotificationConfig is treated as the beacon event config.
 
 > **setNotificationConfig**(`config`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:101](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L101)
+Defined in: [src/ExpoBeaconModule.ts:101](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L101)
 
 Set persistent notification configuration. Settings are saved and applied to all
 subsequent monitoring sessions until explicitly changed.
@@ -662,7 +662,7 @@ subsequent monitoring sessions until explicitly changed.
 
 > **startContinuousScan**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:136](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L136)
+Defined in: [src/ExpoBeaconModule.ts:136](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L136)
 
 Start a continuous BLE scan. Fires `onBeaconFound` / `onEddystoneFound`
 events as beacons are detected. Call stopContinuousScan() to end the scan.
@@ -681,7 +681,7 @@ Eddystone discovery works on both platforms regardless of pairing.
 
 > **startMonitoring**(`options?`): `Promise`\<`void`\>
 
-Defined in: [src/ExpoBeaconModule.ts:119](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L119)
+Defined in: [src/ExpoBeaconModule.ts:119](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L119)
 
 Start background region monitoring for all paired beacons.
 On Android starts a foreground service.
@@ -737,7 +737,7 @@ Override it in a subclass to perform some additional setup once the event starte
 
 > **stopContinuousScan**(): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L139)
+Defined in: [src/ExpoBeaconModule.ts:139](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L139)
 
 Stop the continuous scan started by startContinuousScan().
 
@@ -751,7 +751,7 @@ Stop the continuous scan started by startContinuousScan().
 
 > **stopMonitoring**(): `Promise`\<`void`\>
 
-Defined in: [src/ExpoBeaconModule.ts:126](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L126)
+Defined in: [src/ExpoBeaconModule.ts:126](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L126)
 
 Stop background region monitoring. Persisted monitoring options
 (maxDistance, exitDistance, level, exitTimeoutSeconds, …) are cleared
@@ -798,7 +798,7 @@ Override it in a subclass to perform some additional cleanup once the event is n
 
 > **unpairBeacon**(`identifier`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:64](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L64)
+Defined in: [src/ExpoBeaconModule.ts:64](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L64)
 
 Remove a previously paired beacon.
 
@@ -818,7 +818,7 @@ Remove a previously paired beacon.
 
 > **unpairEddystone**(`identifier`): `void`
 
-Defined in: [src/ExpoBeaconModule.ts:90](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeaconModule.ts#L90)
+Defined in: [src/ExpoBeaconModule.ts:90](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeaconModule.ts#L90)
 
 Remove a previously paired Eddystone beacon.
 

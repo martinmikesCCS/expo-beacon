@@ -38,4 +38,6 @@ the generated lifecycle bridge in the host application.
 - The integration is disabled by default.
 - Disabling the option removes generated registration code and source files on
   the next prebuild.
+- Generated native sources use the background-geolocation v5 Android
+  `LocationEvent` callback and iOS `TSCurrentPositionRequest.make` factory.
 - Repeated prebuilds are expected to be idempotent.

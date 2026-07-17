@@ -8,7 +8,7 @@
 
 > **BeaconNotificationSettings** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:115](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L115)
+Defined in: [src/ExpoBeacon.types.ts:115](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L115)
 
 Notification settings for beacon monitoring.
 
@@ -18,7 +18,7 @@ Notification settings for beacon monitoring.
 
 > `optional` **channel?**: [`NotificationChannelConfig`](NotificationChannelConfig.md)
 
-Defined in: [src/ExpoBeacon.types.ts:121](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L121)
+Defined in: [src/ExpoBeacon.types.ts:121](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L121)
 
 Settings for the Android notification channel used by beacon notifications.
 
@@ -28,7 +28,7 @@ Settings for the Android notification channel used by beacon notifications.
 
 > `optional` **events?**: [`BeaconNotificationConfig`](BeaconNotificationConfig.md)
 
-Defined in: [src/ExpoBeacon.types.ts:117](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L117)
+Defined in: [src/ExpoBeacon.types.ts:117](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L117)
 
 Settings for beacon enter/exit/timeout event notifications.
 
@@ -38,6 +38,6 @@ Settings for beacon enter/exit/timeout event notifications.
 
 > `optional` **foregroundService?**: [`ForegroundServiceConfig`](ForegroundServiceConfig.md)
 
-Defined in: [src/ExpoBeacon.types.ts:119](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L119)
+Defined in: [src/ExpoBeacon.types.ts:119](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L119)
 
 Settings for the persistent Android foreground service notification.

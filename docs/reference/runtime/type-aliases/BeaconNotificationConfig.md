@@ -8,7 +8,7 @@
 
 > **BeaconNotificationConfig** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:71](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L71)
+Defined in: [src/ExpoBeacon.types.ts:71](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L71)
 
 Configuration for beacon enter/exit event notifications.
 
@@ -18,7 +18,7 @@ Configuration for beacon enter/exit event notifications.
 
 > `optional` **body?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:84](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L84)
+Defined in: [src/ExpoBeacon.types.ts:84](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L84)
 
 Notification body template. Supports {identifier} and {event} placeholders.
 Default: "{identifier} region {event}ed".
@@ -29,7 +29,7 @@ Default: "{identifier} region {event}ed".
 
 > `optional` **enabled?**: `boolean`
 
-Defined in: [src/ExpoBeacon.types.ts:73](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L73)
+Defined in: [src/ExpoBeacon.types.ts:73](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L73)
 
 Whether to show enter/exit notifications. Default: true.
 
@@ -39,7 +39,7 @@ Whether to show enter/exit notifications. Default: true.
 
 > `optional` **enterTitle?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:75](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L75)
+Defined in: [src/ExpoBeacon.types.ts:75](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L75)
 
 Notification title on beacon enter. Default: "Beacon Entered".
 
@@ -49,7 +49,7 @@ Notification title on beacon enter. Default: "Beacon Entered".
 
 > `optional` **exitTitle?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:77](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L77)
+Defined in: [src/ExpoBeacon.types.ts:77](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L77)
 
 Notification title on beacon exit. Default: "Beacon Exited".
 
@@ -59,7 +59,7 @@ Notification title on beacon exit. Default: "Beacon Exited".
 
 > `optional` **icon?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:88](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L88)
+Defined in: [src/ExpoBeacon.types.ts:88](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L88)
 
 Android drawable resource name for the notification icon (e.g. "ic_notification").
 
@@ -69,7 +69,7 @@ Android drawable resource name for the notification icon (e.g. "ic_notification"
 
 > `optional` **sound?**: `boolean`
 
-Defined in: [src/ExpoBeacon.types.ts:86](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L86)
+Defined in: [src/ExpoBeacon.types.ts:86](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L86)
 
 Play a sound with the notification (iOS only). Default: true.
 
@@ -79,6 +79,6 @@ Play a sound with the notification (iOS only). Default: true.
 
 > `optional` **timeoutTitle?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L79)
+Defined in: [src/ExpoBeacon.types.ts:79](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L79)
 
 Notification title on beacon timeout. Default: "Beacon Timeout".

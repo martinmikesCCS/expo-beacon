@@ -8,7 +8,7 @@
 
 > **PairedEddystone** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:241](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L241)
+Defined in: [src/ExpoBeacon.types.ts:241](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L241)
 
 An Eddystone-UID beacon that has been paired/registered for monitoring.
 
@@ -21,7 +21,7 @@ SharedPreferences (Android) and may be included in device backups.
 
 > **identifier**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:242](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L242)
+Defined in: [src/ExpoBeacon.types.ts:242](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L242)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [src/ExpoBeacon.types.ts:242](https://github.com/martinmikesccs/expo
 
 > **instance**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:246](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L246)
+Defined in: [src/ExpoBeacon.types.ts:246](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L246)
 
 6-byte instance ID as hex string (12 chars).
 
@@ -39,7 +39,7 @@ Defined in: [src/ExpoBeacon.types.ts:246](https://github.com/martinmikesccs/expo
 
 > `optional` **name?**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:248](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L248)
+Defined in: [src/ExpoBeacon.types.ts:248](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L248)
 
 BLE advertising device name, if provided at pairing time.
 
@@ -49,7 +49,7 @@ BLE advertising device name, if provided at pairing time.
 
 > **namespace**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:244](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L244)
+Defined in: [src/ExpoBeacon.types.ts:244](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L244)
 
 10-byte namespace ID as hex string (20 chars).
 
@@ -59,7 +59,7 @@ Defined in: [src/ExpoBeacon.types.ts:244](https://github.com/martinmikesccs/expo
 
 > `optional` **timeoutSeconds?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:256](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L256)
+Defined in: [src/ExpoBeacon.types.ts:256](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L256)
 
 Timeout in seconds. When set, the module fires `onEddystoneTimeout` once,
 this many seconds after the beacon exits range. The countdown is armed on

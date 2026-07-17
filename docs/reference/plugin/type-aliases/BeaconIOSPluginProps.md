@@ -8,7 +8,7 @@
 
 > **BeaconIOSPluginProps** = `object`
 
-Defined in: [withBeaconIOS.ts:11](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/withBeaconIOS.ts#L11)
+Defined in: [withBeaconIOS.ts:11](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/withBeaconIOS.ts#L11)
 
 ## Properties
 
@@ -16,7 +16,7 @@ Defined in: [withBeaconIOS.ts:11](https://github.com/martinmikesccs/expo-beacon/
 
 > `optional` **backgroundGeolocation?**: `boolean`
 
-Defined in: [withBeaconIOS.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/withBeaconIOS.ts#L19)
+Defined in: [withBeaconIOS.ts:19](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/withBeaconIOS.ts#L19)
 
 Generate and register the optional
 `react-native-background-geolocation` lifecycle bridge.
@@ -35,7 +35,7 @@ false
 
 > `optional` **bluetoothPermission?**: `string`
 
-Defined in: [withBeaconIOS.ts:25](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/withBeaconIOS.ts#L25)
+Defined in: [withBeaconIOS.ts:25](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/withBeaconIOS.ts#L25)
 
 Value for `NSBluetoothAlwaysUsageDescription`.
 
@@ -45,7 +45,7 @@ Value for `NSBluetoothAlwaysUsageDescription`.
 
 > `optional` **locationAlwaysPermission?**: `string`
 
-Defined in: [withBeaconIOS.ts:23](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/withBeaconIOS.ts#L23)
+Defined in: [withBeaconIOS.ts:23](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/withBeaconIOS.ts#L23)
 
 Value for `NSLocationAlwaysAndWhenInUseUsageDescription`.
 
@@ -55,6 +55,6 @@ Value for `NSLocationAlwaysAndWhenInUseUsageDescription`.
 
 > `optional` **locationWhenInUsePermission?**: `string`
 
-Defined in: [withBeaconIOS.ts:21](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/plugin/src/withBeaconIOS.ts#L21)
+Defined in: [withBeaconIOS.ts:21](https://github.com/martinmikesccs/expo-beacon/blob/master/plugin/src/withBeaconIOS.ts#L21)
 
 Value for `NSLocationWhenInUseUsageDescription`.

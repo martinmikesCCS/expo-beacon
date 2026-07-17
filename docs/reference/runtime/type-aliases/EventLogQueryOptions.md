@@ -8,7 +8,7 @@
 
 > **EventLogQueryOptions** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:360](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L360)
+Defined in: [src/ExpoBeacon.types.ts:360](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L360)
 
 Options for filtering event logs.
 
@@ -18,7 +18,7 @@ Options for filtering event logs.
 
 > `optional` **eventType?**: [`BeaconEventName`](BeaconEventName.md)
 
-Defined in: [src/ExpoBeacon.types.ts:364](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L364)
+Defined in: [src/ExpoBeacon.types.ts:364](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L364)
 
 Filter by an emitted event type.
 
@@ -28,7 +28,7 @@ Filter by an emitted event type.
 
 > `optional` **limit?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:362](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L362)
+Defined in: [src/ExpoBeacon.types.ts:362](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L362)
 
 Maximum number of log entries to return (default: 1000, max: 10000).
 
@@ -38,6 +38,6 @@ Maximum number of log entries to return (default: 1000, max: 10000).
 
 > `optional` **sinceTimestamp?**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:366](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L366)
+Defined in: [src/ExpoBeacon.types.ts:366](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L366)
 
 Only return events with timestamp >= this value (ms since epoch).

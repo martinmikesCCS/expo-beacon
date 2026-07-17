@@ -8,7 +8,7 @@
 
 > **EddystoneTimeoutEvent** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:282](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L282)
+Defined in: [src/ExpoBeacon.types.ts:282](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L282)
 
 Payload for Eddystone timeout events (beacon out of range for the configured duration).
 
@@ -18,7 +18,7 @@ Payload for Eddystone timeout events (beacon out of range for the configured dur
 
 > **distance**: `number`
 
-Defined in: [src/ExpoBeacon.types.ts:287](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L287)
+Defined in: [src/ExpoBeacon.types.ts:287](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L287)
 
 Distance in metres at the time the timeout fired. Usually –1, since the beacon is out of range when this fires.
 
@@ -28,7 +28,7 @@ Distance in metres at the time the timeout fired. Usually –1, since the beacon
 
 > **identifier**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:283](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L283)
+Defined in: [src/ExpoBeacon.types.ts:283](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L283)
 
 ***
 
@@ -36,7 +36,7 @@ Defined in: [src/ExpoBeacon.types.ts:283](https://github.com/martinmikesccs/expo
 
 > **instance**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:285](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L285)
+Defined in: [src/ExpoBeacon.types.ts:285](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L285)
 
 ***
 
@@ -44,4 +44,4 @@ Defined in: [src/ExpoBeacon.types.ts:285](https://github.com/martinmikesccs/expo
 
 > **namespace**: `string`
 
-Defined in: [src/ExpoBeacon.types.ts:284](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L284)
+Defined in: [src/ExpoBeacon.types.ts:284](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L284)

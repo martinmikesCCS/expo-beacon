@@ -8,7 +8,7 @@
 
 > **ExpoBeaconModuleEvents** = `object`
 
-Defined in: [src/ExpoBeacon.types.ts:337](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L337)
+Defined in: [src/ExpoBeacon.types.ts:337](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L337)
 
 Module event map.
 
@@ -18,7 +18,7 @@ Module event map.
 
 > **onBeaconDistance**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:340](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L340)
+Defined in: [src/ExpoBeacon.types.ts:340](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L340)
 
 #### Parameters
 
@@ -36,7 +36,7 @@ Defined in: [src/ExpoBeacon.types.ts:340](https://github.com/martinmikesccs/expo
 
 > **onBeaconEnter**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:338](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L338)
+Defined in: [src/ExpoBeacon.types.ts:338](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L338)
 
 #### Parameters
 
@@ -54,7 +54,7 @@ Defined in: [src/ExpoBeacon.types.ts:338](https://github.com/martinmikesccs/expo
 
 > **onBeaconError**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:353](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L353)
+Defined in: [src/ExpoBeacon.types.ts:353](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L353)
 
 Fired when a native monitoring or ranging failure occurs (logged to DB and forwarded to JS).
 
@@ -74,7 +74,7 @@ Fired when a native monitoring or ranging failure occurs (logged to DB and forwa
 
 > **onBeaconExit**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:339](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L339)
+Defined in: [src/ExpoBeacon.types.ts:339](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L339)
 
 #### Parameters
 
@@ -92,7 +92,7 @@ Defined in: [src/ExpoBeacon.types.ts:339](https://github.com/martinmikesccs/expo
 
 > **onBeaconFound**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:344](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L344)
+Defined in: [src/ExpoBeacon.types.ts:344](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L344)
 
 Fired continuously during a live scan as each iBeacon is detected.
 
@@ -112,7 +112,7 @@ Fired continuously during a live scan as each iBeacon is detected.
 
 > **onBeaconTimeout**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:342](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L342)
+Defined in: [src/ExpoBeacon.types.ts:342](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L342)
 
 Fired once `timeoutSeconds` after a paired beacon exits range (cancelled if the beacon is seen again first).
 
@@ -132,7 +132,7 @@ Fired once `timeoutSeconds` after a paired beacon exits range (cancelled if the 
 
 > **onEddystoneDistance**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:349](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L349)
+Defined in: [src/ExpoBeacon.types.ts:349](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L349)
 
 #### Parameters
 
@@ -150,7 +150,7 @@ Defined in: [src/ExpoBeacon.types.ts:349](https://github.com/martinmikesccs/expo
 
 > **onEddystoneEnter**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:347](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L347)
+Defined in: [src/ExpoBeacon.types.ts:347](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L347)
 
 #### Parameters
 
@@ -168,7 +168,7 @@ Defined in: [src/ExpoBeacon.types.ts:347](https://github.com/martinmikesccs/expo
 
 > **onEddystoneExit**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:348](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L348)
+Defined in: [src/ExpoBeacon.types.ts:348](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L348)
 
 #### Parameters
 
@@ -186,7 +186,7 @@ Defined in: [src/ExpoBeacon.types.ts:348](https://github.com/martinmikesccs/expo
 
 > **onEddystoneFound**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:346](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L346)
+Defined in: [src/ExpoBeacon.types.ts:346](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L346)
 
 Fired continuously during a live scan as each Eddystone beacon is detected.
 
@@ -206,7 +206,7 @@ Fired continuously during a live scan as each Eddystone beacon is detected.
 
 > **onEddystoneTimeout**: (`params`) => `void`
 
-Defined in: [src/ExpoBeacon.types.ts:351](https://github.com/martinmikesccs/expo-beacon/blob/be82a50bc9b8174d7f3fb92cc67c52e1c960913f/src/ExpoBeacon.types.ts#L351)
+Defined in: [src/ExpoBeacon.types.ts:351](https://github.com/martinmikesccs/expo-beacon/blob/master/src/ExpoBeacon.types.ts#L351)
 
 Fired once `timeoutSeconds` after a paired Eddystone exits range (cancelled if the beacon is seen again first).
 
