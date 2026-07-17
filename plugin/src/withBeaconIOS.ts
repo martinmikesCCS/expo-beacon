@@ -22,22 +22,133 @@ import Foundation
 import TSLocationManager
 
 final class BeaconGeoPlugin: BeaconLifecycleDelegate {
+  private static let stopGrace: TimeInterval = 30
+  private static let stationaryTransitionTimeout: TimeInterval = 10
+
   private var activeBeaconReasons = Set<String>()
   private var trackingRequested = false
+  private var lifecycleGeneration: UInt = 0
+  private var pendingFinalization: DispatchWorkItem?
+  private var pendingStationaryTransition: DispatchWorkItem?
+  private var awaitingStationaryGeneration: UInt?
+  private var motionChangeListenerRegistered = false
 
   private func startTracking() {
-    if !trackingRequested {
-      trackingRequested = true
-      BackgroundGeolocation.sharedInstance().start()
-    }
-    BackgroundGeolocation.sharedInstance().changePace(true)
+    lifecycleGeneration &+= 1
+    cancelFinalization()
+    trackingRequested = true
+    ensureMotionChangeListener()
+    let bgGeo = BackgroundGeolocation.sharedInstance()
+    bgGeo.start()
+    bgGeo.changePace(true)
   }
 
-  private func stopTracking() {
+  private func scheduleFinalization() {
     guard trackingRequested else { return }
-    trackingRequested = false
-    BackgroundGeolocation.sharedInstance().sync({ _ in }, failure: { _ in })
+    lifecycleGeneration &+= 1
+    let generation = lifecycleGeneration
+    pendingFinalization?.cancel()
+    let finalization = DispatchWorkItem { [weak self] in
+      guard let self = self,
+            generation == self.lifecycleGeneration,
+            self.activeBeaconReasons.isEmpty,
+            self.trackingRequested else { return }
+      self.pendingFinalization = nil
+      self.trackingRequested = false
+      self.requestFinalPosition(generation: generation)
+    }
+    pendingFinalization = finalization
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + Self.stopGrace,
+      execute: finalization
+    )
+  }
+
+  private func canFinalize(_ generation: UInt) -> Bool {
+    activeBeaconReasons.isEmpty && !trackingRequested && generation == lifecycleGeneration
+  }
+
+  private func cancelFinalization() {
+    pendingFinalization?.cancel()
+    pendingFinalization = nil
+    pendingStationaryTransition?.cancel()
+    pendingStationaryTransition = nil
+    awaitingStationaryGeneration = nil
+  }
+
+  private func ensureMotionChangeListener() {
+    guard !motionChangeListenerRegistered else { return }
+    motionChangeListenerRegistered = true
+    _ = BackgroundGeolocation.sharedInstance().onMotionChange { [weak self] _ in
+      guard let self = self else { return }
+      self.runOnMain {
+        self.stationaryTransitionCompleted()
+      }
+    }
+  }
+
+  private func requestFinalPosition(generation: UInt) {
+    guard canFinalize(generation) else { return }
+    let request = TSCurrentPositionRequest(
+      persist: true,
+      success: { [weak self] _ in
+        self?.runOnMain {
+          self?.changeToStationary(generation: generation)
+        }
+      },
+      failure: { [weak self] error in
+        NSLog("[BeaconGeoPlugin] getCurrentPosition failed: %@", error.localizedDescription)
+        self?.runOnMain {
+          self?.changeToStationary(generation: generation)
+        }
+      }
+    )
+    BackgroundGeolocation.sharedInstance().getCurrentPosition(request)
+  }
+
+  private func changeToStationary(generation: UInt) {
+    guard canFinalize(generation) else { return }
+    awaitingStationaryGeneration = generation
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self = self,
+            self.awaitingStationaryGeneration == generation,
+            self.canFinalize(generation) else { return }
+      NSLog("[BeaconGeoPlugin] changePace(false) motion-change timed out")
+      self.stationaryTransitionCompleted()
+    }
+    pendingStationaryTransition = timeout
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + Self.stationaryTransitionTimeout,
+      execute: timeout
+    )
     BackgroundGeolocation.sharedInstance().changePace(false)
+  }
+
+  private func stationaryTransitionCompleted() {
+    guard let generation = awaitingStationaryGeneration,
+          canFinalize(generation) else { return }
+    awaitingStationaryGeneration = nil
+    pendingStationaryTransition?.cancel()
+    pendingStationaryTransition = nil
+    syncAndStop(generation: generation)
+  }
+
+  private func syncAndStop(generation: UInt) {
+    guard canFinalize(generation) else { return }
+    BackgroundGeolocation.sharedInstance().sync({ [weak self] _ in
+      self?.runOnMain {
+        self?.stopTracking(generation: generation)
+      }
+    }, failure: { [weak self] error in
+      NSLog("[BeaconGeoPlugin] sync failed: %@", error.localizedDescription)
+      self?.runOnMain {
+        self?.stopTracking(generation: generation)
+      }
+    })
+  }
+
+  private func stopTracking(generation: UInt) {
+    guard canFinalize(generation) else { return }
     BackgroundGeolocation.sharedInstance().stop()
   }
 
@@ -48,7 +159,7 @@ final class BeaconGeoPlugin: BeaconLifecycleDelegate {
         self.startTracking()
       } else {
         self.activeBeaconReasons.remove(reason)
-        if self.activeBeaconReasons.isEmpty { self.stopTracking() }
+        if self.activeBeaconReasons.isEmpty { self.scheduleFinalization() }
       }
     }
   }
