@@ -27,7 +27,7 @@ export type BeaconIOSPluginProps = {
 
 export function getIOSPluginSwift(): string {
   return `\
-import ExpoBeacon
+internal import ExpoBeacon
 import Foundation
 import TSLocationManager
 
@@ -264,7 +264,13 @@ function findMatchingClosingBrace(
 }
 
 function modifyAppDelegateSwift(contents: string): string {
-  const importLine = "import ExpoBeacon";
+  const importLine = "internal import ExpoBeacon";
+  // Normalize bare imports left behind by older plugin versions so repeated
+  // prebuilds cannot insert a duplicate import.
+  contents = contents.replace(
+    /^([ \t]*)import ExpoBeacon\b/gm,
+    "$1internal import ExpoBeacon",
+  );
   if (!contents.includes(importLine)) {
     const lines = contents.split("\n");
     const lastImport = lines.reduce(
@@ -310,7 +316,8 @@ function unmodifyAppDelegateSwift(contents: string): string {
     /^[ \t]*BeaconLifecycleRegistry\.register\(BeaconGeoPlugin\(\)\)\r?\n/gm,
     "",
   );
-  const generatedImport = /^import ExpoBeacon \/\/ expo-beacon-generated\r?\n/m;
+  const generatedImport =
+    /^(?:internal\s+)?import ExpoBeacon \/\/ expo-beacon-generated\r?\n/m;
   const withoutImport = contents.replace(generatedImport, "");
   if (!/\bBeaconLifecycleRegistry\b/.test(withoutImport))
     contents = withoutImport;
